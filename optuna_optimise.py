@@ -1016,18 +1016,20 @@ import pickle
 path = '/home/owen/Documents/models/optuna/buoy_test/'
 os.chdir(path)
 filenames = glob.glob(path + '*.pkl')
-title_list = []
+models = []
+
 for file in filenames:
-    data = xr.open_dataset(file)
+    model = joblib.load(file)
+    models.append(model)
 
 
 
 
-with open("sar_flyovers_meteofrance", "rb") as fp:
-    test = pickle.load(fp)
 
 
 
+
+# hello git
 
 
 
