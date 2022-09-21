@@ -99,36 +99,23 @@ def sigma_u_panofsky(L, Zi, u_star):
     sigma_u = u_star * np.sqrt(4 + 0.6 * (-Zi / L)**(2/3))
     return sigma_u
 
-def envelope(df, param_x, param_y, begin, end, steps =25, log = True):
-    """
-    function to derive the median and quantiles for a pointcloud from a df with two specified parameters
-    """
-    placeholder = df
-    
-    if log == True:
-        bins = np.logspace(begin, end, steps)
-    else:
-        bins=np.linspace(begin, end, steps)
-        
-    placeholder['bins'], bins = pd.cut(abs(placeholder[param_x]), bins=bins, include_lowest=True, retbins=True)
-        
-    bin_center = (bins[:-1] + bins[1:]) /2
-    bin_median = abs(placeholder.groupby('bins')[param_y].agg(np.nanmedian))#.nanmedian())
-    bin_count = abs(placeholder.groupby('bins')[param_y].count())
-    bin_std = abs(placeholder.groupby('bins')[param_y].agg(np.nanstd)) #.nanstd())
-    bin_quantile_a = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 2.5)))
-    bin_quantile_b = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 16)))
-    bin_quantile_c = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 84)))
-    bin_quantile_d = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 97.5)))
-    return bin_center, bin_median, bin_count, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d
-
-
 
 def outlier_detector(df, column_key_start, column_key_end, pca_comp = 0.80, neighbours = 100, plot_PCA = False):
+    """
+    Function using SKlearn's 'LocalOutlierFactor' to detec outliers within a specififed range of the input df's columns
+    
+    Input:
+        df: dataframe from which to select sub-dataframe
+        column_key_start: name of column to start 
+        column_key_end: nume of column end including column itself
+        pca_comp: number of Principal components to include (int for number, float for fraction explained variance)
+        neighbours: number of neighbours to conisder in localOutlier
+        plot_PCA: if true will plot first two principal componenets and colour outliers
+    """
     
     # -- Select specified columns
     idx_measurements = list(df_val.keys()).index(column_key_start)
-    idx_measurements_end = list(df_val.keys()).index(column_key_end)
+    idx_measurements_end = list(df_val.keys()).index(column_key_end) + 1  # plus 1 because [5:10] does not include idx 10
     data = df.iloc[:, idx_measurements : idx_measurements_end]
     
     # -- change processing depending on whether PCA should be invoked or not
@@ -165,7 +152,6 @@ def outlier_detector(df, column_key_start, column_key_end, pca_comp = 0.80, neig
 
 
 def model_performance(trial, X_train, y_train, cross_validation, pipeline):
-    
     """
     function for splitting, training, assessing and pruning the regressor
     
@@ -187,15 +173,13 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
         MAE_std: standard deviation of MAE
         r2: r2 score of truth and regressor estimate
         r2_std: standard deviation r2
-    
     """
     
     # -- turn train and test arrays into temporary dataframes
     df_X_train = pd.DataFrame(X_train)
     df_y_train = pd.DataFrame(y_train)
     
-    # -- Create K-fold split algorithm to apply on Dataframe --> cross_validation
-    # --retrieve list containing with dataframes for training and testing for each fold
+    # -- Retrieve list containing with dataframes for training and testing for each fold
     indexes_train_kfold = list(cross_validation.split(df_X_train))
     
     r2_fracs = []
@@ -203,10 +187,10 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
     MAE_fracs = []
     MAE_frac_stds = []
     
-    # 
     # -- For each fraction value...
     for idx_fraction, partial_fit_frac in enumerate([0.2, 0.4, 0.6, 1]):
         
+        # -- prepare storage lists
         r2_folds = []
         MAE_folds = []
         
@@ -256,7 +240,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
         # -- Report results to decide wether to prune
         trial.report(MAE_frac, idx_fraction)
         
-        # Prune the intermediate value if neccessary.
+        # -- Prune the intermediate value if neccessary.
         if trial.should_prune():
             raise optuna.TrialPruned()
 
@@ -269,11 +253,15 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
 
 
 
-def create_objective(study_name, save_id, regressor_class, create_params):
+def create_objective(study_name, write_path, regressor_class, create_params):
+    """
+    Nested function containing the optuna objective which has to be mini/maximised
+    """
+    
     def objective(trial):
     
         # save optuna study
-        joblib.dump(study, '/home/owen/Documents/models/optuna/' + study_name + '_' +save_id + '.pkl')
+        joblib.dump(study, write_path + '/' + study_name + '.pkl')
         
         # -- Instantiate scaler for independents
         scalers = trial.suggest_categorical("scalers", [None, 'minmax', 'standard', 'robust'])
@@ -316,6 +304,10 @@ def create_objective(study_name, save_id, regressor_class, create_params):
     return objective
 
 def scaler_chooser(scaler_str):
+    """
+    Function outputs a scaler function corresponding to input string
+    """
+    
     if scaler_str == "minmax":
         scaler = MinMaxScaler()
     elif scaler_str == "standard":
@@ -328,6 +320,10 @@ def scaler_chooser(scaler_str):
     return scaler
 
 def transformer_chooser(transformer_str):
+    """
+    Function outputs a transformer function corresponding to input string
+    """
+    
     if transformer_str == "none":
         transformer = None
     elif transformer_str == "quantile":
@@ -359,7 +355,7 @@ print('# outliers positive validation L: ' + str(len(df) - outliers_prob - len(d
 
 # remove if normalised standard deviation is too low (too pefect slope is presumed wrong)
 number = len(df_val)
-df_val = df_val[df_val.w_star_normalised_deviation >=0.01]
+df_val = df_val[df_val.w_star_normalised_deviation >= 0.01]
 number2 =  len(df_val)
 print('# w* normalised deviation < 0.01: ' + str(number - number2))
 
@@ -374,6 +370,7 @@ number2 =  len(df_val)
 print('# estimated wind direction is exactly along range: ' + str(number - number2))
 
 keep_after_index = list(df_val.keys()).index('wspd_median') # wspd_median is first observation column
+keep_before_index = list(df_val.keys()).index('S_normalised_deviation') +1 # S_normalised_deviation is the last measured param
 
 # # remove outliers in all observation columns
 # def outlier(df):
@@ -399,11 +396,12 @@ spatial_freq = 1/600
 # temperature for estimate is 293 because that was the approximation used, i.e. now the approximation is undone 
 df_val['PSD_spatial']  = df_val.progress_apply(lambda x: calc_PSD_spatial( x['B'], Beta,spatial_freq, 293), axis=1)
 
-# remove meta data and era5 but keep latitude and CNN prediction prob
-df_obs = df_val.iloc[:,keep_after_index:] 
+# remove meta data and era5 but keep lat and lon from image centroid, and CNN prediction prob and PSD spatial
+df_obs = df_val.iloc[:,keep_after_index:keep_before_index] 
 df_obs['prob'] = df_val['prob'] #### df_obs['prob'] = df_val['prob_1'] 
-df_obs['lat'] = df_val['lat']
-df_obs['lon'] = df_val['lon']
+df_obs['lat_centroid'] = df_val['lat_centroid']
+df_obs['lon_centroid'] = df_val['lon_centroid']
+df_obs['PSD_spatial'] = df_val['PSD_spatial']
 
 # add wdir error to validation
 Error_wdir = df_val.wdir_estimate.values - df_val.wdir_era5.values
@@ -619,35 +617,38 @@ methods = {
 
 timeout = 1200
 n_trial = 200
-sampler = TPESampler(42)# TPESampler(seed=42) # RandomSampler(seed=42)
+# sampler = TPESampler(seed = 42)
+sampler = RandomSampler(seed =  42)
 cross_validation = KFold(n_splits = 5, shuffle = False, random_state= None)   #  KFold(n_splits=5)
 
 # according to: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
 # the best sampler for TPE is hyperband whereas for random it is median
-# pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=2, interval_steps=1)
+pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1, interval_steps=1) # warmup steps starts at n=0, 
 # pruner = optuna.pruners.PercentilePruner(percentile = 25.0, n_startup_trials=5, n_warmup_steps=1, interval_steps=1)
-pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
-save_id = 'buoy_filtOnPca080Neighbours100'
+# pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
 
+base_directory = '/home/owen/Documents/models/optuna/rolls/'
+folder = 'buoy_filtOnPca080Neighbours100_randSampMedPrune'
+write_path = base_directory + folder
+
+if not os.path.exists(write_path):
+    os.makedirs(write_path)
 
 studies = {}
 for study_name, (regressor, create_params) in methods.items():
-    storage_name = study_name + '_'  + save_id
     study = optuna.create_study(direction = 'maximize', sampler=sampler, pruner=pruner)
-    study.optimize(create_objective(study_name, save_id, regressor, create_params), n_trials=n_trial, timeout=timeout)
+    study.optimize(create_objective(study_name, write_path, regressor, create_params), n_trials=n_trial, timeout=timeout)
     
     # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
     # here the study is saved once more to include the final iteration
-    joblib.dump(study, '/home/owen/Documents/models/optuna/' + storage_name + '.pkl')
+    joblib.dump(study, write_path + '/' + study_name + '.pkl')
     studies[study_name] = study
 
 
-#%%
+#%% retrieve regressors from stored location
 
 regressor_names = list(methods.keys())
-
-directory = '/home/owen/Documents/models/optuna/buoy_rolls/'
-file_names = [glob.glob(directory + file + '*.pkl')[0] for file in regressor_names]
+directory = '/home/owen/Documents/models/optuna/rolls/era5_filtOnPca080Neighbours100/'
 
 estimators = []
 for regressor_name in regressor_names:
@@ -669,6 +670,10 @@ for regressor_name in regressor_names:
         )
     estimators.append((regressor_name, pipe_single_study))
     
+##########################################################################
+### plot estimated Obukhov lengths before and after stacked correction ###
+##########################################################################
+
 stacking_regressor = StackingRegressor(estimators=estimators, final_estimator=Ridge(), cv = 5)
 stacking_regressor.fit(X_train, y_train)
 
@@ -680,6 +685,11 @@ print(median_absolute_error(y_test, y_pred_stacked))
 print(r2_score(y_train, y_pred_train_stacked))
 print(median_absolute_error(y_train, y_pred_train_stacked))
 
+# plt.scatter(y_test, y_pred_stacked, alpha = 0.5, s=1, c = 'r'); plt.plot([0.5, 3], [0.5, 3], '--k')
+# plt.scatter(y_test, np.log10(abs(X_test[:, list(X.keys()).index('L_estimate')])), alpha = 0.5, s=1, c = 'k'); plt.plot([0.5, 3], [0.5, 3], '--k')
+    
+#%%
+
 ########################################################################
 ### calculate performance per regressor and stacked, including std's ###
 ########################################################################
@@ -690,7 +700,7 @@ r2_test_std = []
 MAE_train = []
 MAE_test = []
 MAE_test_std = []
-kf = KFold(n_splits = 10, shuffle = False, random_state= None)
+kf = KFold(n_splits = 5, shuffle = False, random_state= None)
 
 for i, regressor in enumerate(regressor_names + ['stacked']):
 
@@ -755,24 +765,34 @@ plt_err[-1][0].set_linestyle('--')
 ax.set_ylabel(r"$R^2$", color="k",fontsize=14)
 ax.set_xticks(x_tick_loc, labels = x_tick_label, rotation = 60)
 ax.set_ylim([0.2, 0.8])
-
+ax.grid(axis='y')
 ax2=ax.twinx()
 plt_err = ax2.errorbar(x_tick_loc, MAE_test, yerr = MAE_test_std, linestyle = '-', marker="o", c = 'r', barsabove = True, capsize = 5)
 plt_err[-1][0].set_linestyle('--')
-ax2.set_ylim([0.12, 0.20])
+ax2.set_ylim([0.10, 0.25])
 ax2.set_ylabel("Median Absolute Error",color="r",fontsize=14)
-ax2.set_title(r"Regressor performance on $\mathrm{log_{10}}(|\mathrm{L}|)$ from $\mathrm{log_{10}}(|\mathrm{L_{\mathrm{buoy}}}|)$ for rolls")
-ax2.grid()
+ax2.set_title(r"Regressor performance on $\mathrm{log_{10}}(|\mathrm{L}|)$ from $\mathrm{log_{10}}(|\mathrm{L_{\mathrm{ERA5}}}|)$ for rolls (5-Fold)")
+# ax2.grid()
 
 plt.show()
     
-##################################################################
-### plot estimated Obukhov lengths before and after correction ###
-##################################################################
+######################
+### plot envelopes ###
+######################
 
-plt.scatter(y_test, y_pred_stacked, alpha = 0.5, s=1, c = 'r'); plt.plot([0.5, 3], [0.5, 3], '--k')
-plt.scatter(y_test, np.log10(abs(X_test[:, list(X.keys()).index('L_estimate')])), alpha = 0.5, s=1, c = 'k'); plt.plot([0.5, 3], [0.5, 3], '--k')
-    
-    
+df_plot = pd.DataFrame()
+df_plot['y_test'] = 10**y_test
+df_plot['y_pred'] = abs(X_test[:, list(X.keys()).index('L_estimate')])
+df_plot['y_ML'] = 10**y_pred_stacked
+
+hist_steps = 30
+title = 'Correction using stacked regression from ERA5 $L$ over buoys (rolls)'
+x_axis_title = r"|Obukhov length| validation (ERA5)"
+_ = eq.plot_envelope(df_plot, hist_steps, title = title, x_axis_title = x_axis_title)
+
+#%%
+
+
+
 
 
