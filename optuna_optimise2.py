@@ -11,7 +11,7 @@ Created on Mon Sep 19 12:50:49 2022
 import xarray as xr
 import numpy as np
 import pandas as pd 
-import os
+import os, glob
 
 from matplotlib import pyplot as plt 
 from matplotlib.colors import LogNorm
@@ -123,6 +123,47 @@ def envelope(df, param_x, param_y, begin, end, steps =25, log = True):
     return bin_center, bin_median, bin_count, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d
 
 
+
+def outlier_detector(df, column_key_start, column_key_end, pca_comp = 0.80, neighbours = 100, plot_PCA = False):
+    
+    # -- Select specified columns
+    idx_measurements = list(df_val.keys()).index(column_key_start)
+    idx_measurements_end = list(df_val.keys()).index(column_key_end)
+    data = df.iloc[:, idx_measurements : idx_measurements_end]
+    
+    # -- change processing depending on whether PCA should be invoked or not
+    if (type(pca_comp) == float) | (type(pca_comp) == int) :
+
+        # -- apply standard scaler (outliers will remain)
+        x = StandardScaler().fit_transform(data)
+        
+        # -- select fraction or number of Principal componenets and create PCA
+        pca = PCA(n_components = pca_comp)
+        
+        # -- apply PCA
+        X = pca.fit_transform(x)
+        
+    else:
+        X = data
+        
+    # -- create outlier detector
+    outlier_detector = LocalOutlierFactor(n_neighbors=neighbours)
+    
+    # -- apply detector on data
+    inliers = outlier_detector.fit_predict(X)
+    
+    # -- create df with inliers only
+    df_outliers_removed = df[inliers==1] # inliers = 1
+    
+    if plot_PCA == True:
+        plt.scatter(X[:, 0], X[:, 1], c = inliers)
+        plt.xlabel(r"Principal Component 1"); plt.ylabel(r"Principal Component 2")
+        plt.title("Outliers")
+        
+    return df_outliers_removed
+
+
+
 def model_performance(trial, X_train, y_train, cross_validation, pipeline):
     
     """
@@ -178,18 +219,17 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
             fold_y_train = df_y_train.iloc[fold[0]]
             fold_y_test = df_y_train.iloc[fold[1]]
             
-            # -- retrieve indexes belonging to fraction of the fold 
+            # ... retrieve indexes belonging to fraction of the fold 
             idx_partial_fit_train = pd.DataFrame(fold_X_train).sample(frac = partial_fit_frac, random_state= 42).index
             idx_partial_fit_test = pd.DataFrame(fold_X_test).sample(frac = partial_fit_frac, random_state= 42).index
 
-            # -- select fraction of fold 
+            # ... select fraction of fold 
             fold_X_train_frac = fold_X_train.loc[idx_partial_fit_train]
             fold_X_test_frac = fold_X_test.loc[idx_partial_fit_test]
             fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
             fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
             
             # ... fit to the regressor
-            # pipeline = make_pipeline(LGBMRegressor())
             pipeline.fit(fold_X_train_frac, fold_y_train_frac)
             
             # ... make fold prediction
@@ -199,13 +239,13 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
             MAE_fold = -1* median_absolute_error(fold_y_test_frac, prediction)
             r2_fold = r2_score(fold_y_test_frac, prediction)
             
+            # ... store results to assess performance per fraction
             MAE_folds.append(MAE_fold)
             r2_folds.append(r2_fold)
         
-        # -- Calculate mean and std results per fraction of data
+        # -- Calculate mean and std results from all folds per fraction of data
         r2_frac = np.mean(r2_folds)
         MAE_frac = np.mean(MAE_folds)
-        
         r2_fracs_std = np.std(r2_folds)
         MAE_fracs_std = np.std(MAE_folds)
         
@@ -275,6 +315,28 @@ def create_objective(study_name, save_id, regressor_class, create_params):
     
     return objective
 
+def scaler_chooser(scaler_str):
+    if scaler_str == "minmax":
+        scaler = MinMaxScaler()
+    elif scaler_str == "standard":
+        scaler = StandardScaler()
+    elif scaler_str == "robust":
+        scaler = RobustScaler()
+    else:
+        scaler = None
+        
+    return scaler
+
+def transformer_chooser(transformer_str):
+    if transformer_str == "none":
+        transformer = None
+    elif transformer_str == "quantile":
+        transformer = QuantileTransformer(n_quantiles=500, output_distribution="normal")
+        
+    return transformer
+
+
+
 #%% Load data
 
 file_name = 'wdirwspd_11_05_v25_extra_era5'
@@ -285,13 +347,15 @@ df = df_output.copy()
 #%% filter out specific data 
 
 # remove if classification probability is below 50%
-df_val = df.loc[df['prob'] >= 0.5]
+# df_val = df.loc[df['prob_1'] >= 0.5]
+df_val = df.loc[df['prob'] >= 50]
 outliers_prob = len(df) - len(df_val)
 print('# outliers probability: ' + str(outliers_prob))
 
 # remove if era5 claims either positive Obukhov length or sensible heat flux is into the ocean rather into the atmosphere (positive sshf)
-df_val = df_val.loc[(df_val['L_era5'] < 0) & (df_val['sshf_era5'] < 0 )]
-print('# outliers positive ERA5 L or heat flux into the ocean: ' + str(len(df) - outliers_prob - len(df_val)))
+# df_val = df_val.loc[(df_val['L_era5'] < 0)]
+df_val = df_val.loc[(df_val['L_era5'] < 0) & (df_val['L_buoy'] < 0 )]
+print('# outliers positive validation L: ' + str(len(df) - outliers_prob - len(df_val)))
 
 # remove if normalised standard deviation is too low (too pefect slope is presumed wrong)
 number = len(df_val)
@@ -301,6 +365,7 @@ print('# w* normalised deviation < 0.01: ' + str(number - number2))
 
 # remove if wind direction is exactly range direction  --> unnecessary when using hardcoded ERA5 wind
 number = len(df_val)
+
 df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360)%360 - df_val['wdir_estimate']) >= 0.5]
 df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 90)%360 - df_val['wdir_estimate']) >= 0.5]
 df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 180)%360 - df_val['wdir_estimate']) >= 0.5]
@@ -308,29 +373,22 @@ df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 270)%360 - 
 number2 =  len(df_val)
 print('# estimated wind direction is exactly along range: ' + str(number - number2))
 
-# remove outliers in all observation columns
-def outlier(df):
-    return np.where((df> np.mean(df) + np.std(df)*4) | (df< np.mean(df) - np.std(df)*4))
-
 keep_after_index = list(df_val.keys()).index('wspd_median') # wspd_median is first observation column
-T = df_val.reset_index(drop = True).iloc[:,keep_after_index:].apply(outlier, axis = 0).values[0] # find rows with outliers in any of the estimates parameters
-idx_delete = list(set([x for xs in T for x in xs])) # extract
-print('# outliers: ' + str(len(idx_delete)))
 
+# # remove outliers in all observation columns
+# def outlier(df):
+#     return np.where((df> np.mean(df) + np.std(df)*4) | (df< np.mean(df) - np.std(df)*4))
 
-# # create outlier detector
-# outlier_detector = LocalOutlierFactor(n_neighbors=10)
-# idx_measurements = list(df_val.keys()).index('wspd_median') # index of measurement start (variabels before are validation or metadata)
-# idx_measurements_end = list(df_val.keys()).index('S_normalised_deviation')
-# inliers = outlier_detector.fit_predict(df_val.iloc[:, idx_measurements:idx_measurements_end])
-# df_val = df_val[inliers==1]
-# number3 = len(df_val)
-# print('# outliers: ' + str(number2 - number3))
-# df_val = df_val.reset_index(drop = True)
+# T = df_val.reset_index(drop = True).iloc[:,keep_after_index:].apply(outlier, axis = 0).values[0] # find rows with outliers in any of the estimates parameters
+# idx_delete = list(set([x for xs in T for x in xs])) # extract
+# print('# outliers: ' + str(len(idx_delete)))
+# df_val = df_val.reset_index(drop = True).drop(index = idx_delete)
 
-
-df_val = df_val.reset_index(drop = True).drop(index = idx_delete)
-
+df_val = outlier_detector(df_val, 'window_effect', 'S_normalised_deviation', pca_comp=0.80, neighbours =100, plot_PCA=True)   
+df_val = df_val.reset_index(drop = True)  
+number3 = len(df_val)
+print('# outliers: ' + str(number2 - number3))
+    
 ##########################################################################################
 ######## pre filter on df, not df_val (such that shape stays identical )#################
 ##########################################################################################
@@ -430,22 +488,6 @@ X_train, X_test, y_train, y_test, test_index, train_index = eq.splitTrainTest(X,
 
 
 #%%
-
-timeout = 1000
-n_trial = 200
-sampler = TPESampler(42)# TPESampler(seed=42) # RandomSampler(seed=42)
-cross_validation = KFold(n_splits = 10, shuffle = False, random_state= None)   #  KFold(n_splits=5)
-
-# according to: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
-# the best sampler for TPE is hyperband whereas for random it is median
-# pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=2, interval_steps=1)
-# pruner = optuna.pruners.PercentilePruner(percentile = 25.0, n_startup_trials=5, n_warmup_steps=1, interval_steps=1)
-pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
-save_id = 'test4'
-
-
-
-
 
 methods = {
     "lightgbm": (
@@ -559,7 +601,7 @@ methods = {
         ElasticNet,
         lambda trial: {
             'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
-            'l1_ratio': trial.suggest_float("C", 1e-5, 1.0, log = True),
+            'l1_ratio': trial.suggest_float("l1_ratio", 1e-5, 1.0, log = True),
             'random_state': 42,
         },
     ),
@@ -574,34 +616,163 @@ methods = {
 }
 
 
-methods = {
-    "lightgbm": (
-        LGBMRegressor,
-        lambda trial: {
-            'objective': trial.suggest_categorical("objective", ['regression']),
-            'metric': trial.suggest_categorical("metric", ['mean_squared_error']),
-            'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log = True),
-            'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log = True),
-            'num_leaves': trial.suggest_int('num_leaves', 2, 256),
-            'feature_fraction': trial.suggest_float('feature_fraction', 0.1, 1.0),
-            'bagging_fraction': trial.suggest_float('bagging_fraction', 0.1, 1.0),
-            'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
-            'min_child_samples': trial.suggest_int('min_child_samples', 1, 100),
-            'random_state': 42  
-        },
-    ),
-}
 
+timeout = 1200
+n_trial = 200
+sampler = TPESampler(42)# TPESampler(seed=42) # RandomSampler(seed=42)
+cross_validation = KFold(n_splits = 5, shuffle = False, random_state= None)   #  KFold(n_splits=5)
 
+# according to: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
+# the best sampler for TPE is hyperband whereas for random it is median
+# pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=2, interval_steps=1)
+# pruner = optuna.pruners.PercentilePruner(percentile = 25.0, n_startup_trials=5, n_warmup_steps=1, interval_steps=1)
+pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
+save_id = 'buoy_filtOnPca080Neighbours100'
 
 
 studies = {}
 for study_name, (regressor, create_params) in methods.items():
+    storage_name = study_name + '_'  + save_id
     study = optuna.create_study(direction = 'maximize', sampler=sampler, pruner=pruner)
     study.optimize(create_objective(study_name, save_id, regressor, create_params), n_trials=n_trial, timeout=timeout)
     
-    # 
-    joblib.dump(study, '/home/owen/Documents/models/optuna/' + study_name + '_'  + save_id + '.pkl')
+    # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
+    # here the study is saved once more to include the final iteration
+    joblib.dump(study, '/home/owen/Documents/models/optuna/' + storage_name + '.pkl')
     studies[study_name] = study
 
-test = LGBMRegressor(**study.best_params)
+
+#%%
+
+regressor_names = list(methods.keys())
+
+directory = '/home/owen/Documents/models/optuna/buoy_rolls/'
+file_names = [glob.glob(directory + file + '*.pkl')[0] for file in regressor_names]
+
+estimators = []
+for regressor_name in regressor_names:
+    file_name = glob.glob(directory + regressor_name + '*.pkl')[0]
+
+    study = joblib.load(file_name)
+    
+    list_params = list(study.best_params)
+    list_params.remove('scalers'); list_params.remove('transformers')
+    
+    parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params)}
+    
+    pipe_single_study = Pipeline([
+        ('scaler', scaler_chooser(study.best_params['scalers'])),
+        ('model', TransformedTargetRegressor(
+                regressor = methods[regressor_name][0](**parameter_dict), 
+                transformer= transformer_chooser(study.best_params['transformers'])
+                ))]
+        )
+    estimators.append((regressor_name, pipe_single_study))
+    
+stacking_regressor = StackingRegressor(estimators=estimators, final_estimator=Ridge(), cv = 5)
+stacking_regressor.fit(X_train, y_train)
+
+y_pred_stacked = stacking_regressor.predict(X_test)
+y_pred_train_stacked = stacking_regressor.predict(X_train)
+
+print(r2_score(y_test, y_pred_stacked))
+print(median_absolute_error(y_test, y_pred_stacked))
+print(r2_score(y_train, y_pred_train_stacked))
+print(median_absolute_error(y_train, y_pred_train_stacked))
+
+########################################################################
+### calculate performance per regressor and stacked, including std's ###
+########################################################################
+
+r2_train = []
+r2_test = []
+r2_test_std = []
+MAE_train = []
+MAE_test = []
+MAE_test_std = []
+kf = KFold(n_splits = 10, shuffle = False, random_state= None)
+
+for i, regressor in enumerate(regressor_names + ['stacked']):
+
+    estimator_temp = estimators[i:i+1]
+    
+    if i == 13:
+        estimator_temp = estimators
+    
+        regressor_final = StackingRegressor(estimators=estimator_temp, final_estimator=Ridge(), cv = 5)
+        regressor_final.fit(X_train, y_train)
+        
+    else:
+        regressor_final = estimator_temp[0][1]
+        regressor_final.fit(X_train, y_train)
+    
+    # -- create dataframe just to retrieve fold indexes from K-fold validation for TEST data
+    df_X_test = pd.DataFrame(X_test)
+    idexes_trest_kfold = list(kf.split(df_X_test))
+    
+    # -- prepare storage of per-fold prediction
+    r2_fold = []
+    MAE_fold= []
+    
+    # -- For each TEST data fold...
+    for idx_fold, fold in enumerate(idexes_trest_kfold):
+        
+        # -- Select the fold indexes        
+        fold_test = fold[1]
+
+        # -- Predict on the TEST data fold
+        prediction = regressor_final.predict(X_test[fold_test, :])
+    
+        # -- Assess prediction
+        intermediate_value_MAE = median_absolute_error(y_test[fold_test], prediction)
+        intermediate_value_r2 = r2_score(y_test[fold_test], prediction)
+        
+        # -- Store prediction
+        r2_fold.append(intermediate_value_r2)
+        MAE_fold.append(intermediate_value_MAE)
+        
+    
+    # -- calculate means and std's per fold
+    r2_test.append(np.mean(r2_fold))
+    r2_test_std.append(np.std(r2_fold))
+    MAE_test.append(abs(np.mean(MAE_fold)))
+    MAE_test_std.append(abs(np.std(MAE_fold)))
+ 
+
+######################################################
+### plot performance per regressor and for stacked ###
+######################################################    
+
+fig,ax = plt.subplots(figsize=(8,5))
+nr_ticks = len(regressor_names + ['stacked (ridge)'])
+x_tick_loc = np.linspace(1,nr_ticks, nr_ticks)
+x_tick_label = regressor_names + ['stacked (ridge)']
+
+
+plt_err = ax.errorbar(x_tick_loc, r2_test, yerr = r2_test_std, linestyle = '-', marker="o", c = 'k', barsabove = True, capsize = 5)
+plt_err[-1][0].set_linestyle('--')
+# ax.set_xlabel("ERA5 wind direction in range", fontsize = 14)
+ax.set_ylabel(r"$R^2$", color="k",fontsize=14)
+ax.set_xticks(x_tick_loc, labels = x_tick_label, rotation = 60)
+ax.set_ylim([0.2, 0.8])
+
+ax2=ax.twinx()
+plt_err = ax2.errorbar(x_tick_loc, MAE_test, yerr = MAE_test_std, linestyle = '-', marker="o", c = 'r', barsabove = True, capsize = 5)
+plt_err[-1][0].set_linestyle('--')
+ax2.set_ylim([0.12, 0.20])
+ax2.set_ylabel("Median Absolute Error",color="r",fontsize=14)
+ax2.set_title(r"Regressor performance on $\mathrm{log_{10}}(|\mathrm{L}|)$ from $\mathrm{log_{10}}(|\mathrm{L_{\mathrm{buoy}}}|)$ for rolls")
+ax2.grid()
+
+plt.show()
+    
+##################################################################
+### plot estimated Obukhov lengths before and after correction ###
+##################################################################
+
+plt.scatter(y_test, y_pred_stacked, alpha = 0.5, s=1, c = 'r'); plt.plot([0.5, 3], [0.5, 3], '--k')
+plt.scatter(y_test, np.log10(abs(X_test[:, list(X.keys()).index('L_estimate')])), alpha = 0.5, s=1, c = 'k'); plt.plot([0.5, 3], [0.5, 3], '--k')
+    
+    
+
+
