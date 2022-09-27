@@ -188,7 +188,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
     MAE_frac_stds = []
     
     # -- For each fraction value...
-    for idx_fraction, partial_fit_frac in enumerate([0.2, 0.4, 0.6, 1]):
+    for idx_fraction, partial_fit_frac in enumerate([0.4, 1]):
         
         # -- prepare storage lists
         r2_folds = []
@@ -253,7 +253,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline):
 
 
 
-def create_objective(study_name, write_path, regressor_class, create_params):
+def create_objective(study_name, write_path, regressor_class, create_params, X_training, y_training):
     """
     Nested function containing the optuna objective which has to be mini/maximised
     """
@@ -294,14 +294,19 @@ def create_objective(study_name, write_path, regressor_class, create_params):
             transformer = transformer
             )
             
+        # -- Optionally apply PCA in independent variables such that 99% of variance can still be explained
+        # pca = PCA(n_components = 0.99)
+        
         # -- Make a pipeline
+        # pipeline = make_pipeline(scaler, pca, transformed_regressor)
         pipeline = make_pipeline(scaler, transformed_regressor)
     
         # -- Assess model performance using specified cross validation on pipeline with pruning
-        MAE, r2, MAE_std, r2_std = model_performance(trial, X_train, y_train, cross_validation, pipeline)
+        MAE, r2, MAE_std, r2_std = model_performance(trial, X_training, y_training, cross_validation, pipeline)
         return MAE
     
     return objective
+
 
 def scaler_chooser(scaler_str):
     """
@@ -335,7 +340,7 @@ def transformer_chooser(transformer_str):
 
 #%% Load data
 
-file_name = 'wdirwspd_11_05_v25_extra_era5'
+file_name = 'wdirwspd_11_05_v26_extra_era5'
 file = '/home/owen/Documents/data/'+ file_name +  '.csv'
 df_output = pd.read_csv(file)
 df = df_output.copy()
@@ -401,6 +406,10 @@ df_obs = df_val.iloc[:,keep_after_index:keep_before_index]
 df_obs['prob'] = df_val['prob'] #### df_obs['prob'] = df_val['prob_1'] 
 df_obs['lat_centroid'] = df_val['lat_centroid']
 df_obs['lon_centroid'] = df_val['lon_centroid']
+# df_obs['prob'] = df_val['prob_1']
+# df_obs['lat'] = df_val['lat']
+# df_obs['lon'] = df_val['lon']
+
 df_obs['PSD_spatial'] = df_val['PSD_spatial']
 
 # add wdir error to validation
@@ -425,6 +434,7 @@ kinematic_heat_flux = -df_val.sshf_era5 / (df_val.rhoa_era5 * C_p) # sshf * -1 s
 df_val['L_era5_only'] = -(df_val.tair_era5 + 273.15) * df_val.friction_velocity_era5**3 / (g*kappa*kinematic_heat_flux)
 
 L_param = 'L_estimate'
+# L_param = 'L'
 
 # add Obukhov length errors classes to validation
 df_val['L_rel_error_era5'] = (df_val[L_param] - df_val.L_era5) / df_val.L_era5
@@ -440,7 +450,7 @@ df_val['L_rel_era5_only'] = abs(df_val.L_era5_only) / abs(df_val[L_param])
 df_val['sigma_u_era5'] = df_val.progress_apply(lambda x: sigma_u_panofsky( x['L_era5'], x['pblh_era5'], x['usr_era5']), axis=1)   # 'usr_era5' is friction velocity (u*) from coare4 using era5
 df_val['sigma_u_era5_only'] = df_val.progress_apply(lambda x: sigma_u_panofsky( x['L_era5'], x['pblh_era5'], x['friction_velocity_era5']), axis=1)
 
-# Errors w.r.t buoy
+# ################### # Errors w.r.t buoy #################
 df_val['L_rel_error_buoy'] = (df_val[L_param] - df_val.L_buoy) / df_val.L_buoy
 df_val['L_rel_error_buoy_nosign'] = abs((df_val[L_param] - df_val.L_buoy) / df_val.L_buoy)
 df_val['L_rel_buoy'] = abs(df_val.L_buoy) / abs(df_val[L_param])
@@ -448,10 +458,17 @@ df_val['L_rel_buoy'] = abs(df_val.L_buoy) / abs(df_val[L_param])
 # add Obukhov length error classes to validation
 df_val['sigma_u_buoy'] = df_val.progress_apply(lambda x: sigma_u_panofsky( x['L_buoy'], x['pblh_era5'], x['usr_era5']), axis=1)   # 'usr_era5' is friction velocity (u*) from coare4 using era5
 
+
 #%% split data and prepare functions
 
 ############ All components #############
-X = df_obs   # 
+X = df_obs
+X = pd.concat([
+    df_val.iloc[:, list(df_val.keys()).index('tair_era5'):list(df_val.keys()).index('relh_era5')+1],
+    df_val.iloc[:, list(df_val.keys()).index('tau_era5'):list(df_val.keys()).index('wdir100_era5')+1],
+    df_val.iloc[:, list(df_val.keys()).index('L_era5_only')]],
+    axis = 1,
+    )  # 
 
 ############ Components correlating with error (retrieved by kendall correlation and VIF) #################
 # X = df_obs[['incidence_avg', 'var_highpass', 'var_lowpass', 'L', 'S', 'PSD_spatial']].iloc[:, :]
@@ -459,20 +476,24 @@ X = df_obs   #
 ############ adding components from validation ##############
 # X = pd.concat([df_obs, df_val['wdir_range_era5']], axis = 1).values
 
-############ When applying PCA  #############
- # 1. specify number of pca components (or n_components = 0.95 such that 95% of explained variance is included)
- # 2. Uncomment 'scaler' and 'pca' in pipeline
-
 ############ Validation, transform optional ############
 # y = np.log10(abs(df_val['L_era5_only'].iloc[:]))
 y = np.log10(abs(df_val['L_buoy'].iloc[:]))
 # y = np.log10(abs(df_val['L_era5_only'].iloc[:])) - np.log10(abs(df_val['L'].iloc[:]))
 
-angleBinLow, angleBinHigh = 0, 91
-X = X[(df_val['wdir_range_era5'] < angleBinHigh) & (df_val['wdir_range_era5'] >= angleBinLow)]
-y = y[(df_val['wdir_range_era5'] < angleBinHigh) & (df_val['wdir_range_era5'] >= angleBinLow)]
+############ California houseing price test ############
+# from sklearn.datasets import fetch_california_housing
+# test = fetch_california_housing()
+# X = pd.DataFrame(test.data)
+# y = pd.DataFrame(test.target)
 
-parameters = X.keys()
+############ Subsample data ############
+# angleBinLow, angleBinHigh = 0, 91
+# X = X[(df_val['wdir_range_era5'] < angleBinHigh) & (df_val['wdir_range_era5'] >= angleBinLow)]
+# y = y[(df_val['wdir_range_era5'] < angleBinHigh) & (df_val['wdir_range_era5'] >= angleBinLow)]
+
+# X = X.iloc[:1560,:]
+# y = y.iloc[:1560]
 
 # X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size = 0.2)
 X_train, X_test, y_train, y_test, test_index, train_index = eq.splitTrainTest(X, y, 
@@ -484,6 +505,14 @@ X_train, X_test, y_train, y_test, test_index, train_index = eq.splitTrainTest(X,
                                                                               classToIgnore = None, 
                                                                               continuous = True)
 
+# X_train_hyper, X_train_fit, y_train_hyper, y_train_fit, test_index, train_index =  eq.splitTrainTest(pd.DataFrame(X_train), pd.DataFrame(y_train), 
+#                                                                                                        testSize = 0.8, 
+#                                                                                                        randomState = 42, 
+#                                                                                                        n_splits = 1, 
+#                                                                                                        smote = False, 
+#                                                                                                        equalSizedClasses = False, 
+#                                                                                                        classToIgnore = None, 
+#                                                                                                        continuous = True)
 
 #%%
 
@@ -523,112 +552,115 @@ methods = {
             'learning_rate': trial.suggest_float("learning_rate", 1e-2, 1e0),
         },
     ),
-    "ridge": (
-        Ridge,
-        lambda trial: {
-            'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
-            'solver': trial.suggest_categorical("solver", ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg'])
-        },
-    ),
-    "bayesianridge": (
-        BayesianRidge,
-        lambda trial: {
-            'n_iter': trial.suggest_int("n_iter", 10, 400),
-            'tol': trial.suggest_float("tol", 1e-8, 1e2),
-            'alpha_1': trial.suggest_float("alpha_1", 1e-8, 1e2, log = True),
-            'alpha_2': trial.suggest_float("alpha_2", 1e-8, 1e2, log = True),
-            'lambda_1': trial.suggest_float("lambda_1", 1e-8, 1e2, log = True),
-            'lambda_2': trial.suggest_float("lambda_2", 1e-8, 1e2, log = True),
-        },
-    ),
-    "adaboost": (
-        AdaBoostRegressor,
-        lambda trial: {
-            'n_estimators': trial.suggest_int("n_estimators", 10, 100),
-            'learning_rate': trial.suggest_float("learning_rate", 1e-2, 1e0, log = True),
-            'loss': trial.suggest_categorical("loss", ['linear', 'square', 'exponential']),
-            'random_state': 42,
-        },
-    ),
-    "gradientboost": (
-        GradientBoostingRegressor,
-        lambda trial: {
-            'n_estimators': trial.suggest_int("n_estimators", 10, 300),
-            'learning_rate': trial.suggest_float("learning_rate", 1e-2, 1e0, log = True),
-            'subsample': trial.suggest_float("subsample", 1e-2, 1.0, log = False),
-            'max_depth': trial.suggest_int("max_depth", 1, 10),
-            'criterion': trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error']),
-            'loss': trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'huber', 'quantile']),
-            'random_state': 42,
-        },
-    ),
-    "knn": (
-        KNeighborsRegressor,
-        lambda trial: {
-            'n_neighbors': trial.suggest_int("n_neighbors", 1, 101, step = 5),
-            'weights': trial.suggest_categorical("weights", ['uniform', 'distance']),
-        },
-    ),
-    "sgd": (
-        SGDRegressor,
-        lambda trial: {
-            'loss': trial.suggest_categorical("loss", ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive']),
-            'penalty': trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet']),
-            'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
-            'random_state': 42,
-        },
-    ),
-    "bagging": (
-        BaggingRegressor,
-        lambda trial: {
-            'n_estimators': trial.suggest_int("n_estimators", 1, 101, step = 5),
-            'max_features': trial.suggest_float("max_features", 1e-1, 1.0, step = 0.1),
-            'random_state': 42,
-        },
-    ),
-    "svr": (
-        LinearSVR,
-        lambda trial: {
-            'loss': trial.suggest_categorical("loss", ['epsilon_insensitive', 'squared_epsilon_insensitive']),
-            'C': trial.suggest_float("C", 1e-5, 1e2, log = True),
-            'tol': trial.suggest_float("tol", 1e-8, 1e2, log = True),
-            'random_state': 42,
-        },
-    ),
-    "elasticnet": (
-        ElasticNet,
-        lambda trial: {
-            'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
-            'l1_ratio': trial.suggest_float("l1_ratio", 1e-5, 1.0, log = True),
-            'random_state': 42,
-        },
-    ),
-    "lassolars": (
-        LassoLars,
-        lambda trial: {
-            'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
-            'normalize': trial.suggest_categorical("normalize", [False]),
-            'random_state': 42,
-        },
-    ),
+    # "ridge": (
+    #     Ridge,
+    #     lambda trial: {
+    #         'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
+    #         'solver': trial.suggest_categorical("solver", ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg'])
+    #     },
+    # ),
+    # "bayesianridge": (
+    #     BayesianRidge,
+    #     lambda trial: {
+    #         'n_iter': trial.suggest_int("n_iter", 10, 400),
+    #         'tol': trial.suggest_float("tol", 1e-8, 1e2),
+    #         'alpha_1': trial.suggest_float("alpha_1", 1e-8, 1e2, log = True),
+    #         'alpha_2': trial.suggest_float("alpha_2", 1e-8, 1e2, log = True),
+    #         'lambda_1': trial.suggest_float("lambda_1", 1e-8, 1e2, log = True),
+    #         'lambda_2': trial.suggest_float("lambda_2", 1e-8, 1e2, log = True),
+    #     },
+    # ),
+    # "adaboost": (
+    #     AdaBoostRegressor,
+    #     lambda trial: {
+    #         'n_estimators': trial.suggest_int("n_estimators", 10, 100),
+    #         'learning_rate': trial.suggest_float("learning_rate", 1e-2, 1e0, log = True),
+    #         'loss': trial.suggest_categorical("loss", ['linear', 'square', 'exponential']),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "gradientboost": (
+    #     GradientBoostingRegressor,
+    #     lambda trial: {
+    #         'n_estimators': trial.suggest_int("n_estimators", 10, 300),
+    #         'learning_rate': trial.suggest_float("learning_rate", 1e-2, 1e0, log = True),
+    #         'subsample': trial.suggest_float("subsample", 1e-2, 1.0, log = False),
+    #         'max_depth': trial.suggest_int("max_depth", 1, 10),
+    #         'criterion': trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error']),
+    #         'loss': trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'huber', 'quantile']),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "knn": (
+    #     KNeighborsRegressor,
+    #     lambda trial: {
+    #         'n_neighbors': trial.suggest_int("n_neighbors", 1, 101, step = 5),
+    #         'weights': trial.suggest_categorical("weights", ['uniform', 'distance']),
+    #     },
+    # ),
+    # "sgd": (
+    #     SGDRegressor,
+    #     lambda trial: {
+    #         'loss': trial.suggest_categorical("loss", ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive']),
+    #         'penalty': trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet']),
+    #         'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "bagging": (
+    #     BaggingRegressor,
+    #     lambda trial: {
+    #         'n_estimators': trial.suggest_int("n_estimators", 1, 101, step = 5),
+    #         'max_features': trial.suggest_float("max_features", 1e-1, 1.0, step = 0.1),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "svr": (
+    #     LinearSVR,
+    #     lambda trial: {
+    #         'loss': trial.suggest_categorical("loss", ['epsilon_insensitive', 'squared_epsilon_insensitive']),
+    #         'C': trial.suggest_float("C", 1e-5, 1e2, log = True),
+    #         'tol': trial.suggest_float("tol", 1e-8, 1e2, log = True),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "elasticnet": (
+    #     ElasticNet,
+    #     lambda trial: {
+    #         'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
+    #         'l1_ratio': trial.suggest_float("l1_ratio", 1e-5, 1.0, log = True),
+    #         'random_state': 42,
+    #     },
+    # ),
+    # "lassolars": (
+    #     LassoLars,
+    #     lambda trial: {
+    #         'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
+    #         'normalize': trial.suggest_categorical("normalize", [False]),
+    #         'random_state': 42,
+    #     },
+    # ),
 }
 
 
 
 timeout = 1200
 n_trial = 200
-# sampler = TPESampler(seed = 42)
-sampler = RandomSampler(seed =  42)
+sampler = TPESampler(seed = 42)
+# sampler = RandomSampler(seed =  42)
 cross_validation = KFold(n_splits = 5, shuffle = False, random_state= None)   #  KFold(n_splits=5)
 
 # according to: https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html
 # the best sampler for TPE is hyperband whereas for random it is median
-pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1, interval_steps=1) # warmup steps starts at n=0, 
+# pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=0, interval_steps=1) # warmup steps starts at n=0, 
 # pruner = optuna.pruners.PercentilePruner(percentile = 25.0, n_startup_trials=5, n_warmup_steps=1, interval_steps=1)
-# pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
+pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
 
-base_directory = '/home/owen/Documents/models/optuna/rolls/'
-folder = 'buoy_filtOnPca080Neighbours100_randSampMedPrune'
+base_directory = '/home/owen/Documents/models/optuna/cells/'
+# 'buoy_filtOnPca080Neighbours100_randSampMedPrune'  'buoy_filtOnPca080Neighbours100'
+# 'buoy_filtOnPca080Neighbours100_RandSampMedPrune5Models' 'california_TPE_hyper'
+folder = 'era5_to_buoy2'   
+
 write_path = base_directory + folder
 
 if not os.path.exists(write_path):
@@ -637,7 +669,8 @@ if not os.path.exists(write_path):
 studies = {}
 for study_name, (regressor, create_params) in methods.items():
     study = optuna.create_study(direction = 'maximize', sampler=sampler, pruner=pruner)
-    study.optimize(create_objective(study_name, write_path, regressor, create_params), n_trials=n_trial, timeout=timeout)
+    study.optimize(create_objective(study_name, write_path, regressor, create_params, 
+                                    X_training = X_train, y_training = y_train), n_trials=n_trial, timeout=timeout)
     
     # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
     # here the study is saved once more to include the final iteration
@@ -648,7 +681,26 @@ for study_name, (regressor, create_params) in methods.items():
 #%% retrieve regressors from stored location
 
 regressor_names = list(methods.keys())
-directory = '/home/owen/Documents/models/optuna/rolls/era5_filtOnPca080Neighbours100/'
+# directory = '/home/owen/Documents/models/optuna/rolls/era5_filtOnPca080Neighbours100/'
+# directory = '/home/owen/Documents/models/optuna/rolls/buoy_filtOnPca080Neighbours100_randSampMedPrune/'
+# directory = '/home/owen/Documents/models/optuna/rolls/buoy_filtOnPca080Neighbours100_TPESampHyperPrune5Models/'
+# directory = '/home/owen/Documents/models/optuna/rolls/buoy_filtOnPca080Neighbours100_RandSampMedPrune5Models/'
+# directory = '/home/owen/Documents/models/optuna/rolls/buoy_filtOnPca080Neighbours100_TPESampHyperPrune5Models_TrainSplitHyperFit/'
+# directory = '/home/owen/Documents/models/optuna/cells/buoy_filtOnPca080Neighbours100_TPESampHyperPrune5Models/'
+# directory = '/home/owen/Documents/models/optuna/cells/buoy_filtOnPca080Neighbours100_TPESampHyperPrune5Models_2fracs/'
+# directory = '/home/owen/Documents/models/optuna/cells/era5_wdirwspd24/'
+# directory = '/home/owen/Documents/models/optuna/cells/era5_wdirwspd24_PCA99/'
+# directory = '/home/owen/Documents/models/optuna/rolls/era5_wdirwspd27/'
+# directory = '/home/owen/Documents/models/optuna/rolls/era5_to_buoy/'
+# directory = '/home/owen/Documents/models/optuna/rolls/era5_to_buoy2/'
+# directory = '/home/owen/Documents/models/optuna/rolls/era5_to_buoy2_subsample/'
+# directory = '/home/owen/Documents/models/optuna/cells/era5_to_buoy/'
+directory = '/home/owen/Documents/models/optuna/rolls/era5_to_buoy2/'
+
+# directory = '/home/owen/Documents/models/optuna/cells/era5_filtOnPca080Neighbours100_TPESampHyperPrune5Models_2fracs/'
+
+# directory = '/home/owen/Documents/models/optuna/rolls/california_TPE_hyper/'
+
 
 estimators = []
 for regressor_name in regressor_names:
@@ -663,6 +715,7 @@ for regressor_name in regressor_names:
     
     pipe_single_study = Pipeline([
         ('scaler', scaler_chooser(study.best_params['scalers'])),
+        # ('pca', PCA(n_components = 0.99)),
         ('model', TransformedTargetRegressor(
                 regressor = methods[regressor_name][0](**parameter_dict), 
                 transformer= transformer_chooser(study.best_params['transformers'])
@@ -674,16 +727,19 @@ for regressor_name in regressor_names:
 ### plot estimated Obukhov lengths before and after stacked correction ###
 ##########################################################################
 
-stacking_regressor = StackingRegressor(estimators=estimators, final_estimator=Ridge(), cv = 5)
-stacking_regressor.fit(X_train, y_train)
+X_fit = X_train # X_train   X_train_fit
+y_fit = y_train # y_train    y_train_fit
+
+stacking_regressor = StackingRegressor(estimators= estimators, final_estimator=Ridge(), cv = 5)
+stacking_regressor.fit(X_fit, y_fit)
 
 y_pred_stacked = stacking_regressor.predict(X_test)
-y_pred_train_stacked = stacking_regressor.predict(X_train)
+y_pred_train_stacked = stacking_regressor.predict(X_fit)
 
 print(r2_score(y_test, y_pred_stacked))
 print(median_absolute_error(y_test, y_pred_stacked))
-print(r2_score(y_train, y_pred_train_stacked))
-print(median_absolute_error(y_train, y_pred_train_stacked))
+print(r2_score(y_fit, y_pred_train_stacked))
+print(median_absolute_error(y_fit, y_pred_train_stacked))
 
 # plt.scatter(y_test, y_pred_stacked, alpha = 0.5, s=1, c = 'r'); plt.plot([0.5, 3], [0.5, 3], '--k')
 # plt.scatter(y_test, np.log10(abs(X_test[:, list(X.keys()).index('L_estimate')])), alpha = 0.5, s=1, c = 'k'); plt.plot([0.5, 3], [0.5, 3], '--k')
@@ -706,15 +762,15 @@ for i, regressor in enumerate(regressor_names + ['stacked']):
 
     estimator_temp = estimators[i:i+1]
     
-    if i == 13:
+    if i == len(estimators):
         estimator_temp = estimators
     
         regressor_final = StackingRegressor(estimators=estimator_temp, final_estimator=Ridge(), cv = 5)
-        regressor_final.fit(X_train, y_train)
+        regressor_final.fit(X_fit, y_fit)
         
     else:
         regressor_final = estimator_temp[0][1]
-        regressor_final.fit(X_train, y_train)
+        regressor_final.fit(X_fit, y_fit)
     
     # -- create dataframe just to retrieve fold indexes from K-fold validation for TEST data
     df_X_test = pd.DataFrame(X_test)
@@ -755,7 +811,7 @@ for i, regressor in enumerate(regressor_names + ['stacked']):
 
 fig,ax = plt.subplots(figsize=(8,5))
 nr_ticks = len(regressor_names + ['stacked (ridge)'])
-x_tick_loc = np.linspace(1,nr_ticks, nr_ticks)
+x_tick_loc = np.linspace(1, nr_ticks, nr_ticks)
 x_tick_label = regressor_names + ['stacked (ridge)']
 
 
@@ -764,14 +820,14 @@ plt_err[-1][0].set_linestyle('--')
 # ax.set_xlabel("ERA5 wind direction in range", fontsize = 14)
 ax.set_ylabel(r"$R^2$", color="k",fontsize=14)
 ax.set_xticks(x_tick_loc, labels = x_tick_label, rotation = 60)
-ax.set_ylim([0.2, 0.8])
+ax.set_ylim([0.2, 0.80])
 ax.grid(axis='y')
 ax2=ax.twinx()
-plt_err = ax2.errorbar(x_tick_loc, MAE_test, yerr = MAE_test_std, linestyle = '-', marker="o", c = 'r', barsabove = True, capsize = 5)
+plt_err = ax2.errorbar(x_tick_loc, np.array(MAE_test), yerr = np.array(MAE_test_std), linestyle = '-', marker="o", c = 'r', barsabove = True, capsize = 5)
 plt_err[-1][0].set_linestyle('--')
 ax2.set_ylim([0.10, 0.25])
 ax2.set_ylabel("Median Absolute Error",color="r",fontsize=14)
-ax2.set_title(r"Regressor performance on $\mathrm{log_{10}}(|\mathrm{L}|)$ from $\mathrm{log_{10}}(|\mathrm{L_{\mathrm{ERA5}}}|)$ for rolls (5-Fold)")
+ax2.set_title(r"Regressor performance on $\mathrm{log_{10}}(|\mathrm{L}|)$ from $\mathrm{log_{10}}(|\mathrm{L_{\mathrm{ERA5}}}|)$ for Cells (5-Fold)")
 # ax2.grid()
 
 plt.show()
@@ -780,19 +836,59 @@ plt.show()
 ### plot envelopes ###
 ######################
 
+# L_param = 'L_estimate'
+# L_param = 'L'
+L_param = 'L_era5'
+
 df_plot = pd.DataFrame()
 df_plot['y_test'] = 10**y_test
-df_plot['y_pred'] = abs(X_test[:, list(X.keys()).index('L_estimate')])
+df_plot['y_pred'] = abs(X_test[:, list(X.keys()).index(L_param)])
 df_plot['y_ML'] = 10**y_pred_stacked
 
 hist_steps = 30
-title = 'Correction using stacked regression from ERA5 $L$ over buoys (rolls)'
+title = 'Correction using stacked regression from ERA5 $L$ (Cells)'
 x_axis_title = r"|Obukhov length| validation (ERA5)"
-_ = eq.plot_envelope(df_plot, hist_steps, title = title, x_axis_title = x_axis_title)
-
-#%%
+_ = eq.plot_envelope(df_plot, hist_steps, title = title, x_axis_title = x_axis_title, alpha = 0.5)
 
 
+# L_val = 'L_era5'
+L_val = 'L_buoy'
+
+r2_score(np.log10(abs(df_val[L_val])), np.log10(abs(df_val[L_param]))) 
+mean_absolute_error(np.log10(abs(df_val[L_val])), np.log10(abs(df_val[L_param]))) 
 
 
+#%% plot SHAP
+
+model = methods[regressor_name][0](**parameter_dict)
+model.fit(X_fit, y_fit)
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_fit)
+
+shap.summary_plot(shap_values, X_fit, feature_names = list(X.keys()))
+
+
+#%% plot results per buoy
+
+df_test = df_val.iloc[test_index]
+df_test['error_rem'] = y_test - y_pred_stacked
+
+df_grouped = df_test.groupby(df_test['buoy'])['error_rem']
+func = [(r'$\overline{(U_1 - U_2)^2}$', lambda x: np.median(abs(x)))]
+func2 = [(r'$Count$',lambda x: x.count())]
+
+fig = plt.figure( figsize = (20, 6)) # Create matplotlib figure
+
+ax = fig.add_subplot(111) # Create matplotlib axes
+ax2 = ax.twinx() # Create another axes that shares the same x-axis as ax.
+
+width = 0.4
+
+df_grouped.agg(func).plot(kind = 'bar', ax = ax, stacked=False, width=width, color = 'red', position=1, rot=90, grid = True)
+df_grouped.count().plot(kind = 'bar', ax = ax2, stacked=False, width=width, color = 'black', position=0, rot=90, grid = True)
+
+ax.set_ylabel('Median Aboslute Error')
+ax2.set_ylabel('Observation count')
+
+plt.show()
 
