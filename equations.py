@@ -5,7 +5,7 @@ Created on Fri Apr 15 07:22:33 2022
 
 @author: owen
 """
-
+import pandas as pd
 import xarray as xr
 import xsar
 import xsarsea
@@ -13,6 +13,31 @@ import xrft
 from scipy import ndimage
 from scipy import signal
 import cv2
+
+#%% calculations
+
+def MAD(data):
+    median = np.nanmedian(data)
+    MAD = np.nanmedian(abs(data - median))
+    return MAD
+
+def wdir_errors(wdir_estimate, wdir_validation):
+    Error_wdir = wdir_estimate - wdir_validation
+    Error_wdir = np.where(Error_wdir>=270, Error_wdir - 360, Error_wdir)
+    Error_wdir = np.where(Error_wdir>=90, Error_wdir - 180, Error_wdir)
+    Error_wdir = np.where(Error_wdir<=-270, Error_wdir + 360, Error_wdir)
+    Error_wdir = np.where(Error_wdir<=-90, Error_wdir + 180, Error_wdir)
+    return Error_wdir
+
+    
+# used for weighting w* values in inertial subrange
+def weighted_avg_and_std(values, weights):
+    """
+    Return the weighted average and weighted standard deviation.
+    """
+    average = np.average(values, weights = weights)
+    variance = np.average((values - average)**2, weights = weights)
+    return (average, np.sqrt(variance))
 
 #%% plot data
 
@@ -107,26 +132,26 @@ def twoDPS(image, samplerate, plotting = False):
 #%% spectral circles
 
 
-def circ(radii, circle_colors = 'w', legend = False):
+def circ(radii, circle_colors = 'w', legend = False, linewidth = 2.5, linestyle = '--'):
     
     pi = 3.1415926535
     
-    def multi_circ(radius, color, legend):
+    def multi_circ(radius, color, legend, linewidth, linestyle):
         circx = np.cos(np.arange(0,2*pi,0.01)) * 1 / radius
         circy = np.sin(np.arange(0,2*pi,0.01)) * 1 / radius
     
         if legend == False:
-            plt.plot(circx,circy, c = color, linestyle = '--', linewidth= 2.5)
+            plt.plot(circx,circy, c = color, linestyle = linestyle, linewidth= linewidth)
             plt.text(np.max(circx)/1.5, np.max(circy)/1.5, str(np.round(radius,0)) +'m', color = color, fontsize = 15, weight = 'bold')
         else:
-            plt.plot(circx,circy, c = color, linestyle = '--', linewidth= 2.5, label = str(int(radius)) +'m')
+            plt.plot(circx,circy, c = color, linestyle = linestyle, linewidth= linewidth, label = str(int(radius)) +'m')
     
     if len(circle_colors) != len(radii):
         color = circle_colors[0]
         [multi_circ(radius, color, legend) for radius in radii]
         
     else:
-        [multi_circ(radius, color, legend) for radius, color in zip(radii, circle_colors)]
+        [multi_circ(radius, color, legend, linewidth, linestyle) for radius, color, linewidth, linestyle in zip(radii, circle_colors,linewidth, linestyle)]
     
     if legend == True:
         plt.legend(loc = 'upper right', fancybox=True, framealpha=0.5)
@@ -484,7 +509,7 @@ def ds_spectral_calculations(sar_ds, angle_pre_conversion, interpolation = 'line
     """
     
     # calculate power spectral density of windfield using (and correcting for) a Hanning window
-    CartSpec = xrft.power_spectrum(sar_ds['windfield'] , scaling  = 'density', detrend='constant', window = 'hann', window_correction = 'True')  
+    CartSpec = xrft.power_spectrum(sar_ds['windfield'], scaling  = 'density', detrend='constant', window = 'hann', window_correction = 'True')  
 
     # add and swap dimensions
     CartSpec = CartSpec.assign_coords({'f_range':CartSpec.freq_xtrack_m, 'f_azimuth': CartSpec.freq_atrack_m})
@@ -1041,18 +1066,7 @@ def loop2B(sar_ds, friction_velocity, z_0, Zi, Cdn, PolarSpec_pre, PolarSpec, di
         idx_inertial_min = ((PolarSpec_pre).sel(f = slice(1/600, 1/300)).sum(dim = 'theta')).argmin(dim=['f'])['f'].values * 1 + idx_start_min
         
         idx_inertial_max = ((PolarSpec_pre).sel(f = slice(freq_min, freq_max)).sum(dim = 'theta')).argmax(dim=['f'])['f'].values * 1 + idx_start_max
-    
-    
-    
-    # used for weighting w* values in inertial subrange
-    def weighted_avg_and_std(values, weights):
-        """
-        Return the weighted average and weighted standard deviation.
-        """
-        average = np.average(values, weights = weights)
-        variance = np.average((values - average)**2, weights = weights)
-        return (average, np.sqrt(variance))
-    
+
     
     pi = 3.1415926535
     z = 10                                 # measurements height, 10 metres for CMOD5.N 
@@ -1290,18 +1304,20 @@ def splitTrainTest(x_data, y_validation, testSize = 0.3, randomState = 42, n_spl
                     Does not work with 'equalSizedClasses' or 'classToIgnore'
     
     """
+    y_validation = pd.DataFrame(y_validation.values, columns = ['val'])
+    
     
     if equalSizedClasses == True:
         # take equal number of points from each error class
-        min_number_among_classes = y_validation.groupby('error_class_L', group_keys = False).apply(lambda x: x.count()).min().values[0]
+        min_number_among_classes = y_validation.groupby('val', group_keys = False).apply(lambda x: x.count()).min().values[0]
 
         # apply random smaple using minimum number to achieve equal sized classes
-        y_validation = y_validation.groupby('error_class_L', group_keys = False).apply(lambda x: x.sample(n = min_number_among_classes))
+        y_validation = y_validation.groupby('val', group_keys = False).apply(lambda x: x.sample(n = min_number_among_classes))
         equalSizeIndexes = y_validation.index
         x_data = x_data[x_data.index.isin(equalSizeIndexes)]
     
     # input is dataframe so convert to arrays
-    y_validation = y_validation.reset_index(drop=True).values
+    y_validation = np.ravel(y_validation.reset_index(drop=True).values)
     x_data = x_data.reset_index(drop=True).values
     
     
@@ -1338,24 +1354,26 @@ def envelope(df, param_x, param_y, begin, end, steps =25, log = True):
     """
     import pandas as pd 
     
-    placeholder = df
+    placeholder = df.copy()
     
     if log == True:
         bins = np.logspace(begin, end, steps)
     else:
         bins=np.linspace(begin, end, steps)
         
-    placeholder['bins'], bins = pd.cut(abs(placeholder[param_x]), bins=bins, include_lowest=True, retbins=True)
+    placeholder['bins_x'], bins = pd.cut(abs(placeholder[param_x]), bins=bins, include_lowest=True, retbins=True)
+    placeholder['bins_y'], bins = pd.cut(abs(placeholder[param_y]), bins=bins, include_lowest=True, retbins=True)
         
     bin_center = (bins[:-1] + bins[1:]) /2
-    bin_median = abs(placeholder.groupby('bins')[param_y].agg(np.nanmedian))#.nanmedian())
-    bin_count = abs(placeholder.groupby('bins')[param_y].count())
-    bin_std = abs(placeholder.groupby('bins')[param_y].agg(np.nanstd)) #.nanstd())
-    bin_quantile_a = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 2.5)))
-    bin_quantile_b = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 16)))
-    bin_quantile_c = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 84)))
-    bin_quantile_d = abs(placeholder.groupby('bins')[param_y].agg(lambda x: np.nanpercentile(x, q = 97.5)))
-    return bin_center, bin_median, bin_count, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d
+    bin_median = abs(placeholder.groupby('bins_x')[param_y].agg(np.nanmedian))#.nanmedian())
+    bin_count_x = abs(placeholder.groupby('bins_x')[param_x].count())
+    bin_count_y = abs(placeholder.groupby('bins_y')[param_y].count())
+    bin_std = abs(placeholder.groupby('bins_x')[param_y].agg(np.nanstd)) #.nanstd())
+    bin_quantile_a = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 2.5)))
+    bin_quantile_b = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 16)))
+    bin_quantile_c = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 84)))
+    bin_quantile_d = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 97.5)))
+    return bin_center, bin_median, bin_count_x, bin_count_y, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d
 
 
 def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
@@ -1376,7 +1394,7 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     
     ax2 = axes[0,1]
     ax2_2 = ax2.twinx()
-    bin_center, bin_median, bin_count, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, 'y_test', 'y_pred', \
+    bin_center, bin_median, bin_count_test, bin_count_pred, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, 'y_test', 'y_pred', \
                                                                                                                              -1, 4, steps =hist_steps, log = True)
     ax2.plot(bin_center, bin_median, 'k', label = r'Median$_{estimate}$')
     ax2.fill_between(bin_center, bin_quantile_b, bin_quantile_c, color = 'gray', alpha = 0.8, label = r'$\sigma$')
@@ -1390,10 +1408,10 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     ax2.legend()
     ax2.set_title('Obukhov length prediction (Test)')
     
-    ax2_2.bar(bin_center[1:], bin_count.values[1:], width= np.diff(bin_center), color = 'b')
+    ax2_2.bar(bin_center[1:], bin_count_pred.values[1:], width= np.diff(bin_center), color = 'b')
     ax2_2.tick_params(axis='y', colors='b')
     ax2_2.set_xscale('log')
-    ylim = int(bin_count.max()*3)
+    ylim = int(bin_count_pred.max()*3)
     ax2_2.set_ylim(0,ylim)
     ax2_2.set_ylabel('occurence', color='b')
     
@@ -1410,7 +1428,7 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     ###################### fourth figure ###################
     ax4 = axes[1,1]
     ax4_2 = ax4.twinx()
-    bin_center, bin_median, bin_count, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, 'y_test', 'y_ML', \
+    bin_center, bin_median, bin_count_test, bin_count_pred, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, 'y_test', 'y_ML', \
                                                                                                                              -1, 4, steps =hist_steps, log = True)
     ax4.plot(bin_center, bin_median, 'k', label = r'Median$_{corrected}$')
     ax4.fill_between(bin_center, bin_quantile_b, bin_quantile_c, color = 'gray', alpha = 0.8, label = r'$\sigma$')
@@ -1426,11 +1444,11 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     ax4.set_title('Obukhov length corrected (Test)')
     ax4.legend()
     
-    ax4_2.bar(bin_center[1:], bin_count.values[1:], width= np.diff(bin_center), color = 'b')
+    ax4_2.bar(bin_center[1:], bin_count_pred.values[1:], width= np.diff(bin_center), color = 'b')
     ax4_2.tick_params(axis='y', colors='b')
     ax4_2.set_xscale('log')
     ax4_2.set_ylim(0,ylim )
-    ax4_2.set_ylabel('occurence', color='b')
+    ax4_2.set_ylabel('Occurence', color='b')
     
     fig.tight_layout()
     fig.suptitle(title, fontsize = 15)
@@ -1438,6 +1456,921 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     # plt.subplots_adjust(wspace=0.3)
     plt.show()
 
+def plot_envelope_single(df_plot, param_test, param_predict, hist_steps, title, x_axis_title, y_axis_title, alpha = 1, legend = True):
+
+    fig, axes = plt.subplots(nrows=1, ncols=1, sharex=True, sharey=True,figsize=(7,6))
+    
+    fontsize = 15
+    ax2 = axes
+    ax2_2 = ax2.twinx()
+    bin_center, bin_median, bin_count_test, bin_count_pred, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, param_test, param_predict, \
+                                                                                                                             -1, 4, steps =hist_steps, log = True)
+    ax2.plot(bin_center, bin_median, 'k', label = r'Median')
+    ax2.fill_between(bin_center, bin_quantile_b, bin_quantile_c, color = 'gray', alpha = 0.8, label = r'$68\%%$')
+    ax2.fill_between(bin_center, bin_quantile_a, bin_quantile_d, color = 'gray', alpha = 0.6, label = r'$95\%%$')
+    
+    ax2.set_xscale('log')
+    ax2.set_yscale('log')
+    ax2.plot([1, 3000], [1, 3000], '--k')
+    ax2.set_ylim(0.5,10000)
+    ax2.set_xlim(0.5,10000)
+    # ax2.legend(fontsize = fontsize)
+    # ax2.set_title('Obukhov length prediction (Test)', fontsize=fontsize)
+    ax2.set_ylabel(y_axis_title, fontsize=fontsize)
+    ax2.set_xlabel(x_axis_title, fontsize=fontsize)
+    
+    ax2.tick_params(which='major', width=3, length=6)
+    ax2.tick_params(which='minor', width=1.5, length=3)
+    ax2.tick_params(axis='both', which='major', labelsize=10)
+    
+    
+    # ax2_2.bar(bin_center[1:], bin_count_pred.values[1:], width= np.diff(bin_center), hatch="X", edgecolor = 'k', color = 'gray', alpha = 0.5)
+    ax2_2.step(bin_center[1:], bin_count_pred.values[1:], where = 'mid', color = 'r', alpha = 0.5, linewidth = 3)
+    ax2_2.step(bin_center[1:], bin_count_test.values[1:], where = 'mid', color = 'b', alpha = 0.5, linewidth = 3)
+    # ax2_2.bar(bin_center[1:], bin_count_test.values[1:], width= np.diff(bin_center), color = 'none', edgecolor = 'k')
+    ax2_2.tick_params(axis='y', colors='b')
+    ax2_2.set_xscale('log')
+    ylim = int(bin_count_test.max()*4)
+    ax2_2.set_ylim(0,ylim)
+    ax2_2.set_ylabel('Hist. count', color='b', fontsize=fontsize)
+    
+    # -- plot custom legend
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+
+    if legend == True:
+        legend_elements = [Line2D([0], [0], color='k', lw=4, label = 'Median'),
+                           Patch(facecolor='gray', alpha = 0.8, edgecolor='none', label = '68%'),
+                           Patch(facecolor='gray', alpha = 0.6, edgecolor='none', label = '95%'),
+                           # Patch(hatch="X", edgecolor = 'k', facecolor = 'none', label='Val.'),
+                           Line2D([0], [0], color='r', alpha = 0.5, linewidth = 3, label = 'Est.'),
+                           Line2D([0], [0], color='b', alpha = 0.5, linewidth = 3, label = 'Val.')]
+        plt.legend(handles = legend_elements, framealpha =0.99, edgecolor = 'black', borderpad = 0.2, 
+                   loc = 'upper left', ncol = 2, fontsize = fontsize)
+    
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.88)
+    # plt.subplots_adjust(wspace=0.3)
+    # plt.show()
+    
+    return bin_center, bin_median, bin_count_test, bin_count_pred, bin_std, fig
+   
+
+
+def da_averaging(list_of_dataarrays, list_of_dims):
+
+    """
+    Input:
+        list_of_dataarrays = list of xr.dataarays, input a list of datarrays which are to be stacked along a new dimension
+        list_of_dims = list of str, list of dimensions names perpendicular to which the data ought to be satcked and averaged
+    
+    Output:
+        average of datarraays
+    """
+    
+    # -- create dummy dimensions
+    dummy_dims = [dim +'_dummy' for dim in list_of_dims]
+    # -- create dictionary from lsit of original and dummy dimensions
+    dims_dict = dict(zip(list_of_dims, dummy_dims))
+    # -- rename main dimensions in spectra (f and theta) such that adding a dimension to the existing main coordinates will not crash
+    da_renamed = [arr.swap_dims(dims_dict) for arr in list_of_dataarrays]
+    # -- stack separate polar spectra using a new arbitrary dimension
+    da_stack = xr.concat(da_renamed, dim="tile", coords= list_of_dims , compat="override")
+    # -- take the average over this arbitrary dimension
+    da_mean = da_stack.mean(dim = 'tile')
+    # -- add back previous coordinates belonging to main dimensions
+    # -- NOTE!: since each tile (data array in the stack) should be clipped/interpolated to the same size, all their coordinates are identical
+    coordinates_to_add = {dummy_dim: (dummy_dim, list_of_dataarrays[0][dim].values) for dim, dummy_dim in zip(list_of_dims, dummy_dims)}
+    da_mean = da_mean.assign_coords(coordinates_to_add)
+    # -- rename back to old names
+    da_mean = da_mean.rename(dict(zip(dummy_dims, list_of_dims)))
+    # -- add old attributes
+    for dim in list_of_dims: # for each dimension in the list of dimensions
+        try:
+            for attribute in list(list_of_dataarrays[0][dim].attrs.keys()):  # add every attribute (add in try loop in case no attributes are contained)
+                da_mean[dim].attrs[attribute] = list_of_dataarrays[0][dim].attrs[attribute]
+            pass
+        except Exception:
+            pass
+        
+            
+    return da_mean
+
+
+
+def world_maps_single(df_input, variables, statistics, norms, cmaps, rows, columns, title = None, cbar_title = None, shrink = 0.85,  resolution = 2, pad =0.1, fontsize = 15,
+                      labelsize = 10, labelpad = 15, cbar_ticks = [-1, 0, 1], cbar_labels = ['-1', '0', '1']):
+    
+    """
+    df_input: dataframe containing all variables selected and 'lon' and 'lat' parameters
+    variables: list containing variable names as strings
+    statistics: list containing the statistics as string for each variable (e.g. ['mean', 'median'])
+    norms: list of colorbar norms per variable (e.g. [matplotlib.colors.Normalize(vmin=0, vmax=360), matplotlib.colors.LogNorm(vmin=-15, vmax=15)])
+    cmaps: list of colormap names to be used (e.g. ['Reds_r', 'jet'])
+    rows: number of rows in the figure
+    colums: number of columns in the figure
+    shrink: shrinkage factor of the colorbars
+    resolution: resolution of gridded 'lon' and 'lat'
+    """
+
+    import matplotlib.colors
+    import cartopy as cart
+    import cartopy.crs as ccrs
+    from scipy.stats import binned_statistic_2d
+    import matplotlib.ticker as mticker
+    from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+    
+    # -- create figure
+    fig, axes= plt.subplots(nrows=rows, ncols=columns, sharex=True, sharey=True, figsize=(columns*10,rows*5), subplot_kw={'projection': ccrs.PlateCarree()})
+    
+    
+    # -- set original facecolour to white such that axes can be made gray without making the rest transparant
+    fig.set_facecolor('white')
+    
+    # --------- add coastline to each plot ----------
+    # -- for multiple rows and columns
+    if len(np.shape(axes)) ==2:
+        [(axes[x,y].add_feature(cart.feature.LAND,zorder=100, edgecolor='k'), 
+          axes[x,y].gridlines(crs=ccrs.PlateCarree(), draw_labels=True,linewidth=2, color='gray', alpha=0.5, linestyle='--'), 
+          axes[x,y].set_facecolor('silver')
+         ) for x in np.arange(0,np.shape(axes)[0],1) for y in np.arange(0,np.shape(axes)[1],1)]
+        
+    # -- for single row or column
+    elif len(np.shape(axes)) ==1: 
+        [(axes[x].add_feature(cart.feature.LAND,zorder=100, edgecolor='k'), 
+          axes[x].gridlines(crs=ccrs.PlateCarree(), draw_labels=True,linewidth=2, color='gray', alpha=0.5, linestyle='--'), 
+          axes[x].set_facecolor('silver'),
+         ) for x in np.arange(0,np.shape(axes)[0],1)]
+        
+    # -- for single cell
+    elif ~(len(np.shape(axes)) >=1): 
+          axes.add_feature(cart.feature.LAND,zorder=100, edgecolor='k') 
+          gl = axes.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,linewidth=2, color='gray', alpha=0.5, linestyle='--') 
+          axes.set_facecolor('silver')
+          
+          gl.top_labels = False
+          gl.right_labels = False
+          gl.xlabel_style = {'size': labelsize}
+          gl.ylabel_style = {'size': labelsize}
+          gl.ylocator = mticker.FixedLocator([60, 30, 0, -30, -60])
+          gl.xlocator = mticker.FixedLocator([-180, -120, -60, 0, 60, 120, 180])
+          gl.xformatter = LONGITUDE_FORMATTER
+          gl.yformatter = LATITUDE_FORMATTER
+          axes.set_extent([-180, 180, -75, 75], ccrs.PlateCarree())
+          axes.tick_params(axis='both', which='major', labelsize=labelsize)
+    # -----------------------------------------------
+    
+    # -- create grid for 2D histogram
+    lat = np.arange(-90,90,resolution)
+    lon = np.arange(-180,180,resolution)
+    lons,lats = np.meshgrid(lon,lat)
+    
+    
+    
+    # -- create empty list to store plotted data
+    datas = []
+
+    #######################################
+    ####### 2D binned histogram ###########
+    #######################################
+    for idx, ax in enumerate(np.ravel(axes)):
+        if idx <= len(np.ravel(variables))-1:
+            data, _, _, _ = binned_statistic_2d(df_input.lon,df_input.lat,values=df_input[variables[idx]], statistic= statistics[idx], bins=[lon, lat], expand_binnumbers=True)
+            data = data.T; datas.append(data)
+            im = ax.imshow(data, origin="lower", extent = [-180, 180,-90, 90], cmap = cmaps[idx], norm =norms[idx])
+            if title == None:
+                ax.set_title(r'$\mathbf{%s}(%s)$' %(str(statistics[idx]).replace('_', '\ '), variables[idx].replace('_', '\ ')), fontsize = fontsize)
+            else: 
+                ax.set_title(title, fontsize = fontsize)
+            shrink = shrink
+            cbar = fig.colorbar(im, ax=ax, shrink=shrink, pad=pad, ticks = cbar_ticks) #cbar3.set_ticks([-1, -0.5, 0,  0.5, 1])
+            if cbar_title == None:
+                'ok, no tittle for you then'
+            else:
+                cbar.set_label(cbar_title, rotation=270, labelpad=labelpad, fontsize = fontsize)
+                cbar.ax.set_yticklabels(cbar_labels)
+                cbar.ax.tick_params(labelsize=labelsize) 
+                
+                
+
+#     fig.suptitle(title, fontsize = 20)
+    fig.tight_layout()
+    
+    return fig, datas
+
+
+#######################################################################################################
+# ---------------------------------------------- ML ---------------------------------------------------
+#######################################################################################################
+
+def calc_PSD_spatial(KinHeatFlux, Beta, xi, Tv, Alpha = 0.5, Psi = 1, g = 9.81):
+    """
+    Calculates S(xi) based from kinematic heat flux and several parameters approximates by constants
+        
+    """
+    Alpha                                   # Kolmogorov constant
+    g                                       # Gravitational acceleration, m/s**2
+    Psi                                     # dimensionless dissipation rate, 
+    Tv                                      # Virtual potential temperature, K
+    
+    part1 = Alpha * Beta / xi **(5/3)
+    # part2 = (Psi * KinHeatFlux * g) / (2 * np.pi * Tv)**(2/3)
+    part2 = ((Psi * KinHeatFlux * g) / (2 * np.pi * Tv))**(2/3)
+        
+    PSD_spatial = part1 * part2
+    
+    PSD_spatial = float(np.where(PSD_spatial < 0, np.nan, PSD_spatial))
+    
+    return pd.Series([PSD_spatial])
+
+
+
+def sigma_u_panofsky(L, Zi, u_star):
+    """
+    From Panofsky et al 1977
+    
+    """
+    sigma_u = u_star * np.sqrt(4 + 0.6 * (-Zi / L)**(2/3))
+    return sigma_u
+
+def hex_to_rgb(value):
+    '''
+    Converts hex to rgb colours
+    value: string of 6 characters representing a hex colour.
+    Returns: list length 3 of RGB values
+    
+    Source:
+        https://towardsdatascience.com/beautiful-custom-colormaps-with-matplotlib-5bab3d1f0e72 
+    '''
+    value = value.strip("#") # removes hash symbol if present
+    lv = len(value)
+    return tuple(int(value[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
+
+
+def rgb_to_dec(value):
+    '''
+    Converts rgb to decimal colours (i.e. divides each value by 256)
+    value: list (length 3) of RGB values
+    Returns: list (length 3) of decimal values
+        
+    Source:
+        https://towardsdatascience.com/beautiful-custom-colormaps-with-matplotlib-5bab3d1f0e72 
+    '''
+    return [v/256 for v in value]
+
+
+def get_continuous_cmap(hex_list, float_list=None):
+    ''' 
+    creates and returns a color map that can be used in heat map figures.
+    If float_list is not provided, colour map graduates linearly between each color in hex_list.
+    If float_list is provided, each color in hex_list is mapped to the respective location in float_list. 
+    
+    Parameters
+    ----------
+    hex_list: list of hex code strings
+    float_list: list of floats between 0 and 1, same length as hex_list. Must start with 0 and end with 1.
+    
+    Returns
+    ----------
+    colour map
+    
+    Source:
+        https://towardsdatascience.com/beautiful-custom-colormaps-with-matplotlib-5bab3d1f0e72 
+    '''
+        
+    import matplotlib.colors as mcolors 
+    
+    rgb_list = [rgb_to_dec(hex_to_rgb(i)) for i in hex_list]
+    if float_list:
+        pass
+    else:
+        float_list = list(np.linspace(0,1,len(rgb_list)))
+        
+    cdict = dict()
+    for num, col in enumerate(['red', 'green', 'blue']):
+        col_list = [[float_list[i], rgb_list[i][num], rgb_list[i][num]] for i in range(len(float_list))]
+        cdict[col] = col_list
+    cmp = mcolors.LinearSegmentedColormap('my_cmp', segmentdata=cdict, N=256)
+    return cmp
+
+
+def outlier_detector(df, column_key_start, column_key_end, pca_comp = 0.80, neighbours = 100, plot_PCA = False):
+    """
+    Function using SKlearn's 'LocalOutlierFactor' to detec outliers within a specififed range of the input df's columns
+    
+    Input:
+        df: dataframe from which to select sub-dataframe
+        column_key_start: name of column to start 
+        column_key_end: nume of column end including column itself
+        pca_comp: number of Principal components to include (int for number, float for fraction explained variance)
+        neighbours: number of neighbours to conisder in localOutlier
+        plot_PCA: if true will plot first two principal componenets and colour outliers
+    """
+    
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.neighbors import LocalOutlierFactor
+    
+    # -- Select specified columns
+    idx_measurements = list(df.keys()).index(column_key_start)
+    idx_measurements_end = list(df.keys()).index(column_key_end) + 1  # plus 1 because [5:10] does not include idx 10
+    data = df.iloc[:, idx_measurements : idx_measurements_end]
+    
+    # -- change processing depending on whether PCA should be invoked or not
+    if (type(pca_comp) == float) | (type(pca_comp) == int) :
+
+        # -- apply standard scaler (outliers will remain)
+        x = StandardScaler().fit_transform(data)
+        
+        # -- select fraction or number of Principal componenets and create PCA
+        pca = PCA(n_components = pca_comp)
+        
+        # -- apply PCA
+        X = pca.fit_transform(x)
+        
+    else:
+        X = data
+        
+    # -- create outlier detector
+    outlier_detector = LocalOutlierFactor(n_neighbors=neighbours)
+    
+    # -- apply detector on data
+    inliers = outlier_detector.fit_predict(X)
+    
+    # -- create df with inliers only
+    df_outliers_removed = df[inliers==1] # inliers = 1
+    
+    if plot_PCA == True:
+        plt.figure()
+        plt.scatter(X[:, 0], X[:, 1], c = inliers)
+        plt.xlabel(r"Principal Component 1"); plt.ylabel(r"Principal Component 2")
+        plt.title("Outliers")
+        plt.show()
+        
+    return df_outliers_removed
+
+
+def scaler_chooser(scaler_str):
+    """
+    Function outputs a scaler function corresponding to input string
+    """
+    from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
+    
+    if scaler_str == "minmax":
+        return MinMaxScaler()
+    elif scaler_str == "standard":
+        return StandardScaler()
+    elif scaler_str == "robust":
+        return RobustScaler()
+   
+    return None
+
+
+def pca_chooser(trial = None, **kwargs):
+    """
+    Function outputs a pca function corresponding to input
+    """
+    
+    if kwargs.get('pca_value') is not None:
+        from sklearn.decomposition import PCA
+        type_ref = type(kwargs.get('pca_value'))
+        
+        if type_ref is dict:
+            pca = PCA(**kwargs.get('pca_value'))
+        elif type_ref is int or type_ref is float or type_ref is str:
+            pca = PCA(kwargs.get('pca_value'))
+            # pca = PCA(n_components = kwargs['pca_value'])
+        
+        if trial != None:
+            trial.suggest_categorical('pca_value', [pca.get_params()])
+    else:
+        pca = None
+        if trial != None:
+            trial.suggest_categorical('pca_value', [None])
+        
+    return pca
+
+
+def poly_chooser(trial = None, **kwargs):
+    """
+    Function to transform input variables using polynomial features
+    """
+    
+    if kwargs.get('poly_value') is not None:
+        from sklearn.preprocessing import PolynomialFeatures
+        type_ref = type(kwargs.get('poly_value'))
+        
+        if type_ref is dict:
+            poly = PolynomialFeatures(**kwargs.get('poly_value'))
+        elif type_ref is int or type_ref is float:
+            poly = PolynomialFeatures(degree = kwargs['poly_value'])
+            # poly = PolynomialFeatures(degree = kwargs['poly_value'])
+        
+        if trial != None:
+            trial.suggest_categorical('poly_value', [poly.get_params()])
+    else:
+        poly = None
+        if trial != None:
+            trial.suggest_categorical('poly_value', [None])
+        
+    return poly
+
+
+
+def spline_chooser(trial = None, **kwargs):
+    """
+    Function to transform input variables using spline features
+    """
+    
+    if kwargs.get('spline_value') is not None:
+        from sklearn.preprocessing import SplineTransformer
+        type_ref = type(kwargs.get('spline_value'))
+        
+        if type_ref is dict:
+            spline = SplineTransformer(**kwargs.get('spline_value'))
+        elif type_ref is tuple or type_ref is list:
+            spline = SplineTransformer(*kwargs.get('spline_value'))
+        elif type_ref is int:
+            spline = SplineTransformer(kwargs.get('spline_value'))
+            
+        if trial != None:
+            trial.suggest_categorical('spline_value', [spline.get_params()])
+    else:
+        spline = None
+        if trial != None:
+            trial.suggest_categorical('spline_value', [None])
+        
+    return spline
+    
+
+def transformer_chooser(transformer_str, trial = None, n_quantiles = 500):
+    """
+    Function outputs a transformer function corresponding to input string
+    """
+    
+    from sklearn.preprocessing import QuantileTransformer
+    
+    if transformer_str == "none":
+        return None
+    elif transformer_str == "quantile":
+        
+        # -- if optuna trial is provided to function determine optimal number of quantiles
+        if trial != None:
+            n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step = 100)
+            
+        return QuantileTransformer(n_quantiles=n_quantiles, output_distribution="normal", random_state = 42)
+
+        
+
+def model_performance(trial, X_train, y_train, cross_validation, pipeline, study_name):
+    """
+    function for splitting, training, assessing and pruning the regressor
+    
+    1. First the data is split into K-folds. 
+    2. Iteratively an increasing fraction of the training folds and test fold is taken
+    3. The regressor is trained and assessed iteratively
+    4. If performance is for first iterations is poor, regressor is pruned thus preventing training and testing on full dataset
+    
+    Input:
+        trial: optuna trial (machine learning run with hyperparameters selected by optuna)
+        X_train: array of N samples with M measurements
+        y_train: array of N validation values
+        cross_validation: method of cross valdiation for splitting data into folds
+        pipeline: pipeline serving as a regressor for which the optuna trial is optimizing
+                  i.e. the pipeline is the regressor being tested
+                  
+    Output:
+        MAE: Median Absolute error of regressor
+        MAE_std: standard deviation of MAE
+        r2: r2 score of truth and regressor estimate
+        r2_std: standard deviation r2
+    """
+    
+    from sklearn.metrics import median_absolute_error, r2_score
+    import optuna
+    
+    # -- turn train and test arrays into temporary dataframes
+    df_X_train = pd.DataFrame(X_train)
+    df_y_train = pd.DataFrame(y_train)
+    
+    # -- Retrieve list containing with dataframes for training and testing for each fold
+    indexes_train_kfold = list(cross_validation.split(df_X_train))
+    
+    r2_fracs = []
+    r2_frac_stds = []
+    MAE_fracs = []
+    MAE_frac_stds = []
+    
+    # -- For each fraction value...
+    for idx_fraction, partial_fit_frac in enumerate([0.1, 0.2, 0.3, 0.4, 0.6, 1]):
+        
+        # -- prepare storage lists
+        r2_folds = []
+        MAE_folds = []
+        
+        # -- select the fraction of the fold ...
+        for idx_fold, fold in enumerate(indexes_train_kfold):
+            
+            # ... select a fold 
+            fold_X_train = df_X_train.iloc[fold[0]]
+            fold_X_test = df_X_train.iloc[fold[1]]
+            fold_y_train = df_y_train.iloc[fold[0]]
+            fold_y_test = df_y_train.iloc[fold[1]]
+            
+            # ... retrieve indexes belonging to fraction of the fold 
+            idx_partial_fit_train = pd.DataFrame(fold_X_train).sample(frac = partial_fit_frac, random_state= 42).index
+            idx_partial_fit_test = pd.DataFrame(fold_X_test).sample(frac = partial_fit_frac, random_state= 42).index
+
+            # ... select fraction of fold 
+            fold_X_train_frac = fold_X_train.loc[idx_partial_fit_train]
+            fold_X_test_frac = fold_X_test.loc[idx_partial_fit_test]
+            fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
+            fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
+            
+            # -- determine if regressor is boosted model
+            regressor_is_boosted = bool(set([study_name]) & set(['lightgbm', 'XGBRegressor'])) #catboost
+            
+            # ----------------------Modified------------------------ #!!!
+            # ... if regressor is boosted ...
+            if regressor_is_boosted:
+                # -- fit training data and add early stopping function if 200 iterations did not improve data
+                
+                # -- fit transformers to training fold of training data
+                fold_X_train_frac_transformed = pipeline[:-1].fit_transform(fold_X_train_frac)
+                # -- transform testting fold of training data
+                fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
+                
+                # fit pipeline using pre-fitted transformers
+                pipeline.fit(fold_X_train_frac_transformed, fold_y_train_frac, 
+                              regressor__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
+                              regressor__early_stopping_rounds=20)
+                
+                # ... make fold prediction
+                prediction = pipeline.predict(fold_X_test_frac_transformed)
+                
+            # ... if regressor is NOT boosted ...
+            else:
+                # -- fit training data
+                pipeline.fit(fold_X_train_frac, fold_y_train_frac)
+                
+                # ... make fold prediction
+                prediction = pipeline.predict(fold_X_test_frac)
+    
+            # ---------------------------------------------- #!!!
+            
+            # # ------------------original---------------------------- #!!!
+            # # ... if regressor is boosted ...
+            # if regressor_is_boosted:
+            #     # -- fit training data and add early stopping function if 100 iterations did not improve data
+            #     pipeline.fit(fold_X_train_frac, fold_y_train_frac, 
+            #                   regressor__eval_set=[(fold_X_test_frac, fold_y_test_frac)],
+            #                   regressor__early_stopping_rounds=100)
+                
+            # # ... if regressor is NOT boosted ...
+            # else:
+            #     # -- fit training data
+            #     pipeline.fit(fold_X_train_frac, fold_y_train_frac)
+            # 
+            
+            # # ... make fold prediction
+            # prediction = pipeline.predict(fold_X_test_frac)
+            # ---------------------------------------------- #!!!
+            
+            # ... assess fold performance
+            MAE_fold = -1* median_absolute_error(fold_y_test_frac, prediction) # multiply times -1 such that mobjectvie becomes maximisation 
+            r2_fold = r2_score(fold_y_test_frac, prediction)
+            
+            # ... store results to assess performance per fraction
+            MAE_folds.append(MAE_fold)
+            r2_folds.append(r2_fold)
+        
+        # -- Calculate mean and std results from all folds per fraction of data
+        r2_frac = np.mean(r2_folds)
+        MAE_frac = np.mean(MAE_folds)
+        r2_fracs_std = np.std(r2_folds)
+        MAE_fracs_std = np.std(MAE_folds)
+        
+        # -- Save results
+        r2_fracs.append(r2_frac); r2_frac_stds.append(r2_fracs_std); 
+        MAE_fracs.append(MAE_frac);  MAE_frac_stds.append(MAE_fracs_std)
+        
+        # -- only prune if not applied on fraction containing all datapoints 
+        if partial_fit_frac < 1.0:
+            
+            # -- Report results to decide wether to prune
+            trial.report(MAE_frac, idx_fraction)
+            
+            # -- Prune the intermediate value if neccessary.
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+    # -- final results are those obtained for last fraction (e.g. fraction of 1/1)
+    MAE = MAE_fracs[-1]
+    MAE_std = r2_frac_stds[-1]
+    r2 = r2_fracs[-1]
+    r2_std = r2_frac_stds[-1]
+    return MAE, r2, MAE_std, r2_std
+
+
+
+
+
+def create_objective(study_name, write_path, regressor_class, create_params, X_training, y_training, study, cross_validation, **kwargs):
+    """
+    Nested function containing the optuna objective which has to be mini/maximised
+    
+    input:
+        study_name: str, custom name to save study in folder
+        write_path: str, path to save study
+        regressor_class: regressor loaded from methods
+        create_params: function loading the parameters associated with each regressor
+        X_training: m x n array, independent training data
+        y_training: m x 1 array, dependent training data
+        study: optuna optimisation study 
+        cross_validation: method of cross validation
+            kwargs: 
+                pca_value: int or float, pca compression to apply after scaling of X matrix
+                poly_value: int, creates polynomial expension of degree n of X matrix
+                spline_value_value: int, float, list, dict, creates spline expansion with n_knots and of degree n of X matrix
+            
+            
+    Example:
+        
+    methods = {
+        "xgboost": (
+            XGBRegressor,
+            lambda trial: {
+                'max_depth': trial.suggest_int("max_depth", 1, 20, log = False),
+                'n_estimators': trial.suggest_int("n_estimators", 20, 400, log=False),
+                'eta': trial.suggest_float("eta", 1e-4, 1.0, log = True),
+                'subsample': trial.suggest_float("subsample", 0.1, 1.0, log = False),
+                'colsample_bytree': trial.suggest_float("colsample_bytree", 0.1, 1.0, log = False),
+                'random_state': 42
+            },
+        ),
+        "catboost": (
+            CatBoostRegressor,
+            lambda trial: {
+                # 'depth': trial.suggest_int("depth", 1, 16),
+                'depth': trial.suggest_int("depth", 1, 10),
+                'iterations': trial.suggest_int("iterations", 20, 600, log = True),
+                'l2_leaf_reg': trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True),
+                'learning_rate': trial.suggest_float("learning_rate", 1e-3, 1e0, log = True),
+                'rsm': trial.suggest_float("rsm", 1e-2, 1e0, log = False),
+                'logging_level': 'Silent',  
+                'early_stopping_rounds': 10,
+                'random_seed': 42,
+            },
+        ),
+        "lassolars": (
+            LassoLars,
+            lambda trial: {
+                'alpha': trial.suggest_float("alpha", 1e-8, 1e2, log = True),
+                'normalize': trial.suggest_categorical("normalize", [False]),
+                'random_state': 42,
+            },
+        ),
+    }
+    
+    
+    # -- set study parameters
+    timeout = 600 # seconds
+    n_trial = 200 # runs
+    sampler = TPESampler(seed = 42)
+    cross_validation = KFold(n_splits = 5, shuffle = True, random_state= 42)   #  KFold(n_splits=5)
+    pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
+    
+    # -- to store study results
+    base_directory = '/home/owen/Documents/models/optuna/rolls/'
+    folder = 'test'  
+    write_path = base_directory + folder
+    if not os.path.exists(write_path):
+        os.makedirs(write_path)
+    
+    studies = {}
+    for study_name, (regressor, create_params) in methods.items():
+        study = optuna.create_study(direction = 'maximize', sampler=sampler, pruner=pruner)
+        study.optimize(eq.create_objective(study_name, write_path, regressor, create_params, X_training = X_train,
+                                        y_training = y_train, study = study , cross_validation = cross_validation), n_trials=n_trial, timeout=timeout)
+        
+        # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
+        # here the study is saved once more to include the final iteration
+        joblib.dump(study, write_path + '/' + study_name + '.pkl')
+        studies[study_name] = study
+        
+    """
+    import joblib
+    from sklearn.compose import TransformedTargetRegressor
+    from sklearn.pipeline import Pipeline
+    
+
+    
+    def objective(trial):
+    
+        # save optuna study
+        joblib.dump(study, write_path + '/' + study_name + '.pkl')
+        
+        # -- Instantiate scaler for independents
+        scalers = trial.suggest_categorical("scalers", [None, 'minmax', 'standard', 'robust'])
+        scaler = scaler_chooser(scalers)
+        
+        # -- determine if requested feature combinations improve results
+        # -- only suggest this to trial of kwargs contain at least one of the relevant parameters
+        if any([i in kwargs for i in ['spline_value', 'pca_value','poly_value']]):
+            # -- suggest either to include feature combination or not
+            feature_combo = trial.suggest_categorical("feature_combo", [False, True])
+            
+            # -- if trial will try using feature combinations/compression
+            if feature_combo == True:
+                # -- instantiate pca compression if relevant kwargs included
+                pca = pca_chooser(trial = trial, **kwargs)
+    
+                # -- instantiate spline transformer if relevant kwargs included
+                spline = spline_chooser(trial = trial, **kwargs)
+                
+                # -- instantiate polynomial transformer if relevant kwargs included
+                poly = poly_chooser(trial = trial, **kwargs)
+            else:
+                pca = spline = poly = None
+        else:
+            pca = spline = poly = None
+            
+        # -- Instantiate transformer for dependends
+        transformers = trial.suggest_categorical("transformers", ['none', 'quantile'])
+        transformer = transformer_chooser(transformers, trial = trial)
+
+        # -- Tune estimator algorithm
+        param = create_params(trial)
+    
+        # -- Create regressor
+        regressor = regressor_class()
+        regressor.set_params(**param)
+        
+        # -- Create transformed regressor
+        transformed_regressor = TransformedTargetRegressor(
+            regressor = regressor,
+            transformer = transformer
+            )
+        
+        # # -- Make a pipeline
+        # pipeline = Pipeline([('scaler', scaler), ('regressor', transformed_regressor)])
+        pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca), ('regressor', transformed_regressor)])
+        
+        # -- Assess model performance using specified cross validation on pipeline with pruning
+        MAE, r2, MAE_std, r2_std = model_performance(trial, X_training, y_training, cross_validation, pipeline, study_name)
+        return MAE 
+    
+    return objective
+
+
+def equal_dist(X, y, param, nbins, ranges, samples = 1000, replace = False):
+    """
+    function to sample dependent and independent dataframes according to specific parameter
+    
+    Input:
+        X: dataframe, contains the independend parameters. Assumed to be of shape N x M
+        y: dataseries/dataframe, contains the dependend parameter. Assumed to be of shape N x 1
+        param: str, parameter which to bin along specified ranges, must be contained in either X_filt or y_filt
+        ranges: tuple of int/ flaot, contains the domain edges over which to bin
+        samples: int, number of points to sample from each bin
+        replace: boolean, if True will sample with replacement allowing for oversampling, else not
+        
+    Output:
+        X_sampled: resampled version of X
+        y_sampled: resampled version of y with identical indexes as X_resampled
+        
+    Example:
+        resample_dict = {'param': 'L_era5', 'nbins': 8, 'ranges' : (np.log10(20),np.log10(300)), 'replace': False, 'samples': 50}
+        X, y = equal_dist(X, y, **resample_dict)  
+    """
+    
+    #X_filt = X; y_filt = y; param = 'L_era5'; nbins = 10; ranges = (0,3); replace = True; samples = 1000
+    bins = np.linspace(*ranges, nbins + 1)
+    
+    # -- merge independent and independent dataframes
+    placeholder = X.merge(y, left_index = True, right_index = True).copy()
+    
+    # -- Calculate bins and for each row add corresponding bin 
+    placeholder['bins'], _ = pd.cut(placeholder[param], bins=bins, include_lowest=True, retbins=True)
+    
+    # -- Sample each bin according to desired number of samples and whether to oversample or not (i.e. sample with replacement)
+    sampled = placeholder.groupby('bins').apply(lambda x: x.sample(n = samples, replace = replace, random_state = 42))
+    
+    # -- drop bin index
+    sampled.reset_index(drop = True, inplace= True)
+    
+    # return to original shape
+    y_sampled = sampled.iloc[:,-2]
+    X_sampled = sampled.iloc[:,:-2]
+    
+    return X_sampled, y_sampled
+
+
+def angular_diff(point1, point2):
+    
+    """
+    point1: tuple, y and x coordinates of first point
+    point2: tuple, y and x coordinates of second point
+    """
+    
+    distance_y =  point2[0] - point1[0]
+    distance_x =  point2[1] - point1[1]
+    
+    # -- angle of 0 means new point is north of old point in coordinate system
+    # angle = 90 mean new point lies to the right, angle =-90 means point lies to the left
+    angle = np.arctan2(distance_y, distance_x)*180/np.pi*-1 + 90
+    
+    return angle
+
+def field_diff(da, n_points):
+    import scipy
+    
+    """
+    input:
+        da: data array with coordinates atrack_m, xtrack_m
+        n_points: number of points for which to compute difference and distance to all other points
+    """
+    
+
+    #da = data_xr # image_sub
+    dim = da.dims
+    image_subsample = da[
+        np.array([int(x) for x in np.linspace(0, da[dim[0]].size-1, n_points)]),
+        np.array([int(x) for x in np.linspace(0, da[dim[1]].size-1, n_points)])
+        ]
+
+    image_subsample_dataframe = image_subsample.to_dataframe()
+    coordinates = list(image_subsample_dataframe.index)
+    # list_of_list = np.array(list(image_subsample_dataframe.index))
+    # coordinates = [tuple(x) for x in list_of_list]
+    
+    # -- calculate angular difference between all points
+    list_list_ang_diff = [[angular_diff(coordinates_clipped, coord) for i, coord in enumerate(coordinates[j+1:])] for j, coordinates_clipped in enumerate(coordinates)]
+    # -- "explode" list of lists
+    ang_diff = [item for sublist in list_list_ang_diff for item in sublist]
+    
+    # -- calculate distances between all points
+    distance_grid = scipy.spatial.distance.cdist(coordinates, coordinates, metric='euclidean')
+    
+    # -- find diagonal indexes and lower triangle for removal
+    low_tri_idx = np.tril_indices(len(distance_grid))
+    
+    # -- set to undesireable indexes to 0
+    distance_grid[low_tri_idx] = 0
+    
+    # -- ravel grid and remove all points with 0 distance
+    distance_ravel = np.ravel(distance_grid)
+    distance = np.delete(distance_ravel, distance_ravel == 0)
+    
+    # -- Repeat but for wind field differencees using same indexes to delete
+    param = list(image_subsample_dataframe.keys())[-1]
+    field = np.array(image_subsample_dataframe[param])
+    
+    # Calculate absolute differences between each element 
+    difference_grid = field[:,None] - field
+    
+    # ravel grid and remove all points with 0 distance
+    difference_ravel = np.ravel(difference_grid)
+    difference = np.delete(difference_ravel, distance_ravel == 0)
+    
+    df = pd.DataFrame()
+    df['difference'] = np.ravel(difference)
+    df['distance'] = np.ravel(distance)
+    df['ang_diff'] = ang_diff
+    df['difference_square'] = df['difference']**2
+    df['difference_root'] = abs(df['difference'])**0.5
+    
+    return df
+
+def semi_variogram(differences, distances, distances_bins, method = 'semi'):
+    
+    # -- create dataframe
+    df = pd.DataFrame()
+    df['difference'] = differences
+    df['distance'] = distances
+    
+    # -- split according to bins
+    df['bins'] = pd.cut(df['distance'], bins = distances_bins)
+    
+    # standard semi variogram
+    if method == 'semi':
+        
+        # -- calculate semi variogram
+        df['difference_square'] = df['difference']**2
+        y_hat = df.groupby('bins')['difference_square'].mean()/2#
+        
+    # robust semi variogram
+    elif method == 'robust':
+        
+        # -- calculate multiplier
+        bins_count = df.groupby('bins')['difference'].count()
+        delta = 1/ (2* (0.457 + (0.494/ bins_count)))
+        
+        # -- calculate semi variogram
+        df['difference_root'] = abs(df['difference'])**0.5
+        y_hat = delta * (df.groupby('bins')['difference_root'].mean())**4
+    
+    return y_hat
 
 #%%
 
@@ -1459,6 +2392,26 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
 
 
 #%%
+
+# # -- remove if wind direction is exactly range direction  --> unnecessary when using hardcoded ERA5 wind
+# number = len(df_val)
+
+# df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360)%360 - df_val['wdir_estimate']) >= 0.5]
+# df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 90)%360 - df_val['wdir_estimate']) >= 0.5]
+# df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 180)%360 - df_val['wdir_estimate']) >= 0.5]
+# df_val = df_val.loc[abs(((df_val['mean_ground_heading'] + 360)%360 + 270)%360 - df_val['wdir_estimate']) >= 0.5]
+# number2 =  len(df_val)
+# print('# estimated wind direction is exactly along range: ' + str(number - number2))
+
+
+# # -- remove outliers in all observation columns
+# def outlier(df):
+#     return np.where((df> np.mean(df) + np.std(df)*4) | (df< np.mean(df) - np.std(df)*4))
+
+# T = df_val.reset_index(drop = True).iloc[:,keep_after_index:].apply(outlier, axis = 0).values[0] # find rows with outliers in any of the estimates parameters
+# idx_delete = list(set([x for xs in T for x in xs])) # extract
+# print('# outliers: ' + str(len(idx_delete)))
+# df_val = df_val.reset_index(drop = True).drop(index = idx_delete)
 
 
 #%% calcualte 1D powerspectrum 
@@ -1551,7 +2504,7 @@ def plot_envelope(df_plot, hist_steps, title, x_axis_title, alpha = 1):
     
 #     # Select kolmogorov drop off 
 #     begin = 0.012 #0.0042 #0.0009
-#     end = 0.03  # !!!   0.01 for 650m for 0.0063 for 1000m       0.002
+#     end = 0.03  #   0.01 for 650m for 0.0063 for 1000m       0.002
     
 #     axis_kolmogorov = x_axis[np.where((x_axis < end) & (x_axis > begin))]
 #     idx_kolmogorov = np.argmin(x_axis < end)
