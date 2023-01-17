@@ -27,6 +27,8 @@ from sklearn.ensemble import AdaBoostRegressor, GradientBoostingRegressor, HistG
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.dummy import DummyRegressor
 from sklearn.svm import LinearSVR
+
+# -- requires custom downloads
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
