@@ -35,7 +35,7 @@ idxes = [371, 321, 302, 176, 139, 122, 121, 112, 110, 72, 49, 20, 15, 346, 304, 
 # idxes = [49,  51,  59,  64,  69,  98, 113, 117, 124, 145, 173, 176, 182, 188, 206, 209, 219, 226, 245, 265, 283, 321, 324, 350, 363, 376, 380, 385, 387]  # window effect < 0.8
 # idxes = [36, 45, 85, 146, 166, 168, 175, 205, 220, 244, 252, 254, 298, 319, 375] #var_cartesian > 5
 # idxes = [15, 110, 176, 302, 96, 371]
-idxes = [112, 129, 174, 189, 233, 242, 257, 295] # nice +1 prior to -5/3
+# idxes = [112, 129, 174, 189, 233, 242, 257, 295] # nice +1 prior to -5/3
 # 96, 371, good example of swell highjacking spectrum
 # 110, 176, 302 nice microscale, 15 nice mesoscale
 
@@ -66,10 +66,10 @@ for i in tqdm(idxes):
         dissip_rate = 1 # dimensionless energy dissipation rate (semi constant in the mixed layer at 0.5-1.0, varies much more in the mixed layer)
         z = 10  # measurement height
         
-        # -- prepare dataset
+        # -- prepare dataset by applying coordinate conversions and adding additional detrended arrays
         sar_ds = eqa.ds_prepare(sar_ds)
         
-        # -- compute cartesian of spectrum sigma0
+        # -- compute cartesian spectrum of sigma0 field
         cartesian_spectrum_sigma0, var_cartesian_sigma0, var_beyond_nyquist_sigma0 = eqa.ds_cartesian_spectrum(sar_ds, smoothing = True, parameter = 'sigma0_detrend', scaling  = 'density', detrend=None, window = None, window_correction = None)
             
         # -- interpolate cartesian sigma0 spectrum to polar spectrum
@@ -88,7 +88,6 @@ for i in tqdm(idxes):
         # -- sigma0
         da_polar_sigma_mean, _ = eqa.tiled_spectra(ds = sar_ds, parameter = 'sigma0', tiles = 2)
                 
-        
         # -- calculate parameters from averaged spectra
         var_windfield = sar_ds['windfield'].var().values*1
         theta_spacing = da_polar_mean.theta.spacing * np.pi / 180 # in radian
@@ -102,7 +101,34 @@ for i in tqdm(idxes):
         angle_diff_theta_75_of_min_freq_theta_25_of_max_freq, angle_diff_theta_75_of_min_freq_theta_50_of_max_freq, angle_diff_theta_50_of_min_freq_theta_25_of_max_freq, \
         angle_diff_theta_25_of_max_freq_theta_75_of_max_freq, angle_diff_theta_50_of_max_freq_theta_75_of_max_freq, angle_diff_theta_25_of_max_freq_theta_50_of_max_freq \
          = eqa.spectral_calculations(da_polar_mean, theta_spacing, frequency_spacing, var_windfield, var_cartesian, var_beyond_nyquist, angle_pre_conversion = angle_pre_conversion, freq_max = 1 / 600, freq_min = 1 / 3000)
-
+        
+        # ----------- Testing-------------
+        # -- ORIGINAL with spectra computed as average from several tiles
+        spectrum_bandpass_beam = beam2.sel(f = slice(freq_min, freq_max)) * 2 # (times two because there are two beams --> average both)
+        bandpass_PSD = spectrum_bandpass_beam*spectrum_bandpass_beam.f
+        
+        # -- spectra computed from un-tiled image
+        da_polar_mean_nonTiled, _ = eqa.tiled_spectra(ds = sar_ds, parameter = 'windfield', tiles = 1)
+        beam1_untiled, beam2_untiled, _, beams, var_bandpass, var_highpass, var_lowpass, var_bandpass_beam, var_polar, var_beam, \
+        polar_effect, window_effect, low_pass_frac, high_pass_frac, bandpass_frac, frac_beam, density_beam, density_bandpass, density_beam_bandpass, freq_25, freq_50, freq_75, \
+        angle_diff_max_min_75_25, angle_diff_max_min_75_50, angle_diff_max_min_50_25, angle_diff_min_theta_75_of_min_freq, angle_diff_min_theta_50_of_min_freq, angle_diff_min_theta_25_of_min_freq,\
+        angle_diff_theta_25_of_min_freq_theta_75_of_min_freq, angle_diff_theta_50_of_min_freq_theta_75_of_min_freq, angle_diff_theta_75_of_min_freq_theta_50_of_min_freq, \
+        angle_diff_theta_75_of_min_freq_theta_25_of_max_freq, angle_diff_theta_75_of_min_freq_theta_50_of_max_freq, angle_diff_theta_50_of_min_freq_theta_25_of_max_freq, \
+        angle_diff_theta_25_of_max_freq_theta_75_of_max_freq, angle_diff_theta_50_of_max_freq_theta_75_of_max_freq, angle_diff_theta_25_of_max_freq_theta_50_of_max_freq \
+         = eqa.spectral_calculations(da_polar_mean_nonTiled, theta_spacing, frequency_spacing, var_windfield, var_cartesian, var_beyond_nyquist, angle_pre_conversion = angle_pre_conversion, freq_max = 1 / 600, freq_min = 1 / 3000)
+        spectrum_bandpass_beam_unTiled = beam2.sel(f = slice(freq_min, freq_max)) * 2 # (times two because there are two beams --> average both)
+        bandpass_PSD_unTiled = spectrum_bandpass_beam_unTiled*spectrum_bandpass_beam_unTiled.f
+        
+        plt.figure()
+        bandpass_PSD_unTiled.sum(dim='f').plot(yscale = 'log')
+        bandpass_PSD.sum(dim='f').plot(yscale = 'log')
+        
+        plt.figure()
+        bandpass_PSD_unTiled.sum(dim='theta').plot(yscale = 'log')
+        bandpass_PSD.sum(dim='theta').plot(yscale = 'log')
+        
+        # --------------------------------
+    
         # -- compute friction velocity of wind field in loop 1
         U_n = sar_ds['windfield'].median().values*1
         u_star, z_0, Cdn = eqa.loop1(U_n = U_n, z = z)
@@ -111,7 +137,7 @@ for i in tqdm(idxes):
         smoothing = False
         sigma_u, L, B, w_star, w_star_normalised_deviation, corr_fact, H, Zi_estimate, valley_estimate, idx_inertial_min, idx_inertial_max, PSD= \
             eqa.loop2B(U_n=U_n, u_star=u_star, z_0=z_0, Zi=Zi_era5, Cdn=Cdn, PolarSpec=da_polar_mean, label=label,
-                        z = z, dissip_rate = dissip_rate, freq_max = 1/600, freq_min = freq_min, freq_lower_lim=freq_lower_lim, smoothing = smoothing)
+                        z = z, dissip_rate = dissip_rate, freq_max = freq_max, freq_min = freq_min, freq_lower_lim=freq_lower_lim, smoothing = smoothing)
         
         # -- condense spectra into a singular PSD value --> calculate normalise with frequency, normalise with 
         _, S_windfield_xi_mean, S_windfield_xi_std_norm = eqa.da_PSD(da_polar_mean, idx_inertial_max = idx_inertial_max, idx_inertial_min = idx_inertial_min)
@@ -156,7 +182,7 @@ for i in tqdm(idxes):
         ## Plot spectrum ####
         #####################
         
-        if i%1 == 0:
+        if i%1 == np.nan:
             # plot spectrum
             fig = plt.figure(figsize = (24,6))
             
