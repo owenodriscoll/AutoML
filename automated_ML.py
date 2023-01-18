@@ -154,6 +154,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
 #%% regressor selection
 
+# -- create dictionary whose keys call respective regressors
 regressors= [DummyRegressor, LGBMRegressor, XGBRegressor, CatBoostRegressor, BayesianRidge, LassoLars, AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor,
              KNeighborsRegressor, SGDRegressor, BaggingRegressor, LinearSVR, ElasticNet]
 regressor_id= ['dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet']
