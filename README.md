@@ -14,12 +14,14 @@ Note:
 ```python
 import sklearn
 import pandas as pd
-import auto_ML_custom as autoML
+import auto_ML_custom as autoML # load custom python file containing relevant functions
 
+# -- import continuous dataset from sklearn for regression
 dataset = sklearn.datasets.fetch_california_housing()
 X_full, y_full = dataset.data, dataset.target
-y = pd.DataFrame(y_full)
-X = pd.DataFrame(X_full)
+
+# -- convert arrays to DataFrames, the required input format for `automated_regression`
+y = pd.DataFrame(y_full); X = pd.DataFrame(X_full)
 
 metric_performance_summary_dict, idexes_test_kfold, y_pred, y_test = autoML.automated_regression(
     y = y, X = X, test_frac = 0.2, timeout = 600, n_trial = 100, 
