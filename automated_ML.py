@@ -80,11 +80,10 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     Output:
         metric_performance_summary_dict: dict, contains mean and std. performance per metric per regressor in list_regressors_training
         idexes_test_kfold: list of tuples of numpary arrays, contains fold training and test indexes for test dataset
-        y_pred: array, contains estimates of y predicted on the test dataset
-        y_test: array, contains validation values of y
         test_index: array, indexes of test fraction
         train_index: array, indexes of training fraction
-        
+        y_pred: array, contains estimates of y predicted on the test dataset
+        y_test: array, contains validation values of y
     ------------------------------------
     Example:
         
@@ -98,7 +97,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         y = pd.DataFrame(y_full)
         X = pd.DataFrame(X_full)
 
-        metric_performance_summary_dict, idexes_test_kfold, y_pred, y_test = automated_regression(
+        metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test = automated_regression(
             y = y, X = X, test_frac = 0.2, timeout = 600, n_trial = 100, 
             metric_optimise = sklearn.metrics.mean_pinball_loss,  metric_assess = [sklearn.metrics.mean_pinball_loss, sklearn.metrics.mean_squared_error, sklearn.metrics.r2_score],
             optimisation_direction = 'minimize',  overwrite = True, 
@@ -106,9 +105,11 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
             random_state = 42)
         
     ------------------------------------
-    Note: parameters poly_value, spline_value and pca_value are optional. Even when they are submitted, optimization might favour excluding them. 
-          Poly_value and spline_value generally improve linear models but add little to boosted models. pca_value serves as compression.
-          When all three are included they are performed on the data in the following order: poly_value --> spline_value --> (optional scaler) --> pca_value 
+    Note: 
+        1. Parameters poly_value, spline_value and pca_value are optional. Even when they are submitted, optimization might favour excluding them. 
+           Poly_value and spline_value generally improve linear models but add little to boosted models. pca_value serves as compression.
+           When all three are included they are performed on the data in the following order: poly_value --> spline_value --> (optional scaler) --> pca_value 
+        2. cross_validation, sampler and pruner are set to the standard versions when None is supplied
     
     """
     # -- split data into traning and testing datasets
@@ -152,10 +153,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
     return performance_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test
         
-# test text for test_ branch
-# test 2
-# wiewee
-#%% regressor selection
+# regressor selection
 
 # -- create dictionary whose keys call respective regressors
 regressors= [DummyRegressor, LGBMRegressor, XGBRegressor, CatBoostRegressor, BayesianRidge, LassoLars, AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor,
