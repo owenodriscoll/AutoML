@@ -1,5 +1,5 @@
 # auto_ML_custom
-## automated_ML
+## automated_ML.py
 Package to call for automated regression. The `automated_regression` function performs several operations in one:
 * Splits data into training and testing fractions
 * Optimisation of specified regression models following specified metrics
@@ -33,5 +33,5 @@ metric_performance_summary_dict, idexes_test_kfold, y_pred, y_test = autoML.auto
 
 ```
 
-## optuna_visualisation
+## optuna_visualisation.py
 insert
