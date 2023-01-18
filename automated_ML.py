@@ -21,7 +21,8 @@ from sklearn.compose import TransformedTargetRegressor
 from sklearn.metrics import median_absolute_error, r2_score, make_scorer
 from sklearn.pipeline import Pipeline
 
-# -- following imports are only required if selected in list_regressor_hyper, else they can be removed from method dictionary below
+# -- following imports are only required if selected in list_regressor_hyper, else they can be commented out here ...
+# ... and removed the 'methodSelector' functions and `regressors`, `regressors_id` and `regressors_dict` lines
 from sklearn.linear_model import LassoLars, Ridge, ElasticNet, BayesianRidge, SGDRegressor
 from sklearn.ensemble import AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor, BaggingRegressor, StackingRegressor
 from sklearn.neighbors import KNeighborsRegressor
