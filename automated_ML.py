@@ -151,7 +151,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
     return performance_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test
         
-        
+# test text for test_ branch
 #%% regressor selection
 
 # -- create dictionary whose keys call respective regressors
