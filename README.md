@@ -14,7 +14,7 @@ Note:
 ```python
 import sklearn
 import pandas as pd
-import auto_ML_custom as autoML # load custom python file containing relevant functions
+import automated_ML as autoML # load custom python file containing relevant functions
 
 # -- import continuous dataset from sklearn for regression
 dataset = sklearn.datasets.fetch_california_housing()
