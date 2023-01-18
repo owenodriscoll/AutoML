@@ -89,7 +89,6 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
         import sklearn
         import pandas as pd
-        import sklearn
         from sklearn.datasets import fetch_california_housing
 
         dataset = fetch_california_housing()
@@ -153,7 +152,6 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
     return performance_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test
         
-# regressor selection
 
 # -- create dictionary whose keys call respective regressors
 regressors= [DummyRegressor, LGBMRegressor, XGBRegressor, CatBoostRegressor, BayesianRidge, LassoLars, AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor,
@@ -185,7 +183,7 @@ def methodSelector(metric, random_state):
         param_dict['bagging_freq'] = trial.suggest_int('bagging_freq', 1, 7)
         param_dict['min_child_samples'] = trial.suggest_int('min_child_samples', 1, 100)
         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
+        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [-1])
         return param_dict
     
     def xgboostHParams(trial):
@@ -194,7 +192,7 @@ def methodSelector(metric, random_state):
         param_dict['lambda'] = trial.suggest_float("lambda", 1e-8, 10.0, log = True)
         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 10.0, log = True)
         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        param_dict['verbosity'] = 0
+        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
         
         if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
             param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
