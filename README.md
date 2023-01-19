@@ -3,6 +3,7 @@
 - `automated_ML.py`: file containing automised machine learning algorithms 
 - `example_automated_ML.ipynb`: example notebook for regression on California house price dataset
 - `optuna_visualisation.py`: python script to visualise intermediate optimisation REQUIRES UPDATE
+- `auto_ML_env.yml.`: environment file containing all the necessary packages (along with a LOT of clutter, best to manually download missing packages)
 
 
 
