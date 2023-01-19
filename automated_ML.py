@@ -11,9 +11,10 @@ Created on Wed Dec 28 16:41:02 2022
 import numpy as np
 import pandas as pd 
 pd.options.mode.chained_assignment = None 
-import os
+import os, sys
 import joblib
 import optuna
+import warnings
 
 from optuna.samplers import TPESampler #, RandomSampler
 from sklearn.model_selection import KFold
@@ -41,7 +42,8 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
                          poly_value = None, spline_value = None, pca_value = None, 
                          metric_optimise = median_absolute_error, metric_assess = [median_absolute_error, r2_score], optimisation_direction = 'maximize', 
                          write_folder = os.getcwd() + '/auto_regression/', overwrite = False, 
-                         list_regressors_hyper = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'], list_regressors_training = None, random_state = 42):
+                         list_regressors_hyper = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'], list_regressors_training = None, 
+                         random_state = 42, warning_verbosity = 'ignore'):
     
     """
     ------------------------------------
@@ -75,6 +77,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
             Options are : 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_training: list of parameters to train and assess on performance. Listed regressors must be present in write_folder
         random_state: int, set random state for reproducibility
+        warning_verbosity: str, warning setting for 'UserWarning', defaults to ignore (prevents command line from getting clogged). Automatically reverts back to 'default' after function complete
         
     ------------------------------------
     Output:
@@ -130,6 +133,11 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     if not os.path.exists(write_folder):
         os.makedirs(write_folder)
 
+    # -- prepare warnings
+    warnings.simplefilter(warning_verbosity, UserWarning)
+    old_stdout = sys.stdout
+    sys.stdout = open(os.devnull, "w") if warning_verbosity == 'ignore' else old_stdout
+        
     ####################################################
     # -- perform optuna optimisation per regressors -- # 
     ####################################################
@@ -150,6 +158,10 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     performance_dict, idexes_test_kfold, y_pred = regression_assess(X_train, X_test, y_train, y_test, list_regressors_training, estimators, metric_assess, 
                                                                     cross_validation, write_folder, overwrite, random_state)
         
+    # -- undo warning setting
+    warnings.simplefilter('default', UserWarning)
+    sys.stdout = old_stdout
+    
     return performance_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test
         
 
