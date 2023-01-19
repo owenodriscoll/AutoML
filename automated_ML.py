@@ -207,7 +207,7 @@ def methodSelector(metric, random_state):
         param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
         
         if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
-            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
+            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)
             param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, 400, log=False)
             param_dict['eta'] = trial.suggest_float("eta", 1e-4, 1.0, log = True)
             param_dict['min_child_weight'] = trial.suggest_float("min_child_weight", 0, 10, log = False)
