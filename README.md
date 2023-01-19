@@ -1,4 +1,11 @@
 # auto_ML_custom
+## Contents
+- `automated_ML.py`: file containing automised machine learning algorithms 
+- `example_automated_ML.ipynb`: example notebook for regression on California house price dataset
+- `optuna_visualisation.py`: python script to visualise intermediate optimisation REQUIRES UPDATE
+
+
+
 ## automated_ML.py
 Package to call for automated regression. The `automated_regression` function performs several operations in one:
 * Splits data into training and testing fractions
@@ -11,6 +18,9 @@ Package to call for automated regression. The `automated_regression` function pe
 Note: 
 - Recommended to select a unique `write_folder` to store intermediate optimisation progress, otherwise each run will generate (or overwrite) previous optimisation.
 - Function is designed for continuous data and regression only, not time series or classifications.
+
+### Example
+For a more detailed example checkout `example_automated_ML.ipynb`
 
 ```python
 import pandas as pd
