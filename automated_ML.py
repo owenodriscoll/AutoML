@@ -43,7 +43,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
                          metric_optimise = median_absolute_error, metric_assess = [median_absolute_error, r2_score], optimisation_direction = 'maximize', 
                          write_folder = os.getcwd() + '/auto_regression/', overwrite = False, 
                          list_regressors_hyper = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'], list_regressors_training = None, 
-                         random_state = 42, warning_verbosity = 'ignore'):
+                         fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1], random_state = 42, warning_verbosity = 'ignore'):
     
     """
     ------------------------------------
@@ -76,6 +76,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         list_regressors_hyper: list of str, containing names of regressors for which to apply hyperparameter optimisation. 
             Options are : 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_training: list of parameters to train and assess on performance. Listed regressors must be present in write_folder
+        fit_frac: 
         random_state: int, set random state for reproducibility
         warning_verbosity: str, warning setting for 'UserWarning', defaults to ignore (prevents command line from getting clogged). Automatically reverts back to 'default' after function complete
         
@@ -143,7 +144,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     ####################################################
     
     regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X_train, y_train, sampler, pruner, metric_optimise, cross_validation, 
-                       poly_value, spline_value, pca_value, n_trial,timeout, write_folder, overwrite, random_state)
+                       poly_value, spline_value, pca_value, n_trial,timeout, write_folder, overwrite, fit_frac, random_state)
       
     ########################################################
     # -- fit regressors using optimised hyperparameters -- #
@@ -527,7 +528,7 @@ def transformer_chooser(transformer_str, trial = None, n_quantiles = 500, random
 
         
 
-def model_performance(trial, X_train, y_train, cross_validation, pipeline, study_name, metric = median_absolute_error, random_state = 42):
+def model_performance(trial, X_train, y_train, cross_validation, pipeline, study_name, metric = median_absolute_error, fit_frac = None, random_state = 42):
     """
     function for splitting, training, assessing and pruning the regressor
     
@@ -543,13 +544,17 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
         cross_validation: method of cross valdiation for splitting data into folds
         pipeline: pipeline serving as a regressor for which the optuna trial is optimizing
                   i.e. the pipeline is the regressor being tested
+        study_name:
+        metric:
+        fit_frac:
+        random_state
                   
     Output:
-        MAE: Median Absolute error of regressor
-        MAE_std: standard deviation of MAE
-        r2: r2 score of truth and regressor estimate
-        r2_std: standard deviation r2
+        result_folds_fracs: 
+            
     """
+    
+    min_samples = int(np.ceil(len(X_train) * min(fit_frac) * (cross_validation.n_splits -1) / cross_validation.n_splits))
     
     # -- turn train and test arrays into temporary dataframes
     df_X_train = pd.DataFrame(X_train)
@@ -562,13 +567,14 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
     result_folds_stds = []
 
     # -- For each fraction value...
-    for idx_fraction, partial_fit_frac in enumerate([0.1, 0.2, 0.3, 0.4, 0.6, 1]):
+    for idx_fraction, partial_fit_frac in enumerate(fit_frac):
         
         # -- prepare storage lists
         result_folds = []
         
         # -- select the fraction of the fold ...
         for idx_fold, fold in enumerate(indexes_train_kfold):
+            
             
             # ... select a fold 
             fold_X_train = df_X_train.iloc[fold[0]]
@@ -587,7 +593,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
             fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
             
             # -- determine if regressor is boosted model
-            regressor_is_boosted = bool(set([study_name]) & set(['lightgbm', 'xgboost'])) #catboost ignored, bugs  out
+            regressor_is_boosted = bool(set([study_name]) & set(['lightgbm'])) #xgboost and catboost ignored, bugs  out
             
             # -- fit training data and add early stopping function if X-iterations did not improve data
             # ... if regressor is boosted ...
@@ -595,6 +601,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
                 
                 # -- fit transformers to training fold of training data
                 fold_X_train_frac_transformed = pipeline[:-1].fit_transform(fold_X_train_frac)
+                
                 # -- transform testting fold of training data
                 fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
                 
@@ -651,7 +658,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
 
 
 
-def create_objective(study_name, write_path, regressor_class, create_params, X_training, y_training, study, cross_validation, metric = None, random_state = 42, **kwargs):
+def create_objective(study_name, write_path, regressor_class, create_params, X_training, y_training, study, cross_validation, metric = None, fit_frac = None, random_state = 42, **kwargs):
     """
     Nested function containing the optuna objective which has to be mini/maximised
     
@@ -665,12 +672,16 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
         study: optuna optimisation study 
         cross_validation: method of cross validation
         metric: function, optimisation metric used to measure optimasation performance e.g. metric = sklearn.metrics.r2_score
-            kwargs: 
-                pca_value: int or float, pca compression to apply after scaling of X matrix
-                poly_value: int, creates polynomial expension of degree i of X matrix
-                spline_value: int, float, list, dict, creates spline expansion with n_knots and of degree i of X matrix
+        fit_frac:
+        random_state:
+        kwargs: 
+            pca_value: int or float, pca compression to apply after scaling of X matrix
+            poly_value: int, creates polynomial expension of degree i of X matrix
+            spline_value: int, float, list, dict, creates spline expansion with n_knots and of degree i of X matrix
         
     """
+    
+    
     
     def objective(trial):
     
@@ -693,8 +704,8 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
             
             # -- if trial will try using feature combinations/compression
             if feature_combo == True:
-                # -- instantiate pca compression if relevant kwargs included
-                pca = pca_chooser(trial = trial, **kwargs)
+                # # -- instantiate pca compression if relevant kwargs included
+                # pca = pca_chooser(trial = trial, **kwargs)
     
                 # -- instantiate spline transformer if relevant kwargs included
                 spline = spline_chooser(feature_combo = feature_combo, trial = trial, **kwargs)
@@ -703,8 +714,11 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
                 poly = poly_chooser(trial = trial, **kwargs)
             else:
                 # pca = poly = None
-                pca = spline = poly = None
+                # pca = spline = poly = None
+                spline = poly = None
                 
+            # -- instantiate pca compression if relevant kwargs included
+            pca = pca_chooser(trial = trial, **kwargs)
         else:
             pca = spline = poly = None
             
@@ -729,14 +743,14 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
         pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca), ('regressor', transformed_regressor)])
         
         # -- Assess model performance using specified cross validation on pipeline with pruning
-        result = model_performance(trial, X_training, y_training, cross_validation, pipeline, study_name, metric, random_state)
+        result = model_performance(trial, X_training, y_training, cross_validation, pipeline, study_name, metric, fit_frac, random_state)
         return result 
     return objective
 
 
     
 def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X_train, y_train, sampler, pruner, metric, cross_validation, 
-                       poly_value, spline_value, pca_value, n_trial,timeout, write_folder, overwrite, random_state):
+                       poly_value, spline_value, pca_value, n_trial,timeout, write_folder, overwrite, fit_frac, random_state):
     """
     Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
     """
@@ -762,7 +776,8 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
                     print(len(message)*'_' + '\n' + message + '\n' + len(message)*'_')
             
             study.optimize(create_objective(regressor_name, write_folder, regressor, create_params, metric = metric,
-                                            X_training = X_train, y_training = y_train, study = study , cross_validation = cross_validation, random_state = random_state,
+                                            X_training = X_train, y_training = y_train, study = study , cross_validation = cross_validation, 
+                                            fit_frac = fit_frac, random_state = random_state,
                                             poly_value = poly_value, spline_value = spline_value, pca_value = pca_value), # < -- optional poly, spline and pca attributes
                            n_trials=n_trial, timeout=timeout)
             
