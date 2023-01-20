@@ -821,20 +821,23 @@ def regressor_fit(list_regressors_training, write_folder):
         
         # -- if combinations of features or feature compression is performed...
         if 'feature_combo' in list_params:
+            
             if study.best_params['feature_combo'] == True:
-                # -- instantiate pca compression if relevant kwargs included       
-                pca = pca_chooser(**study.best_params)
                 # -- instantiate spline transformer if relevant kwargs included
                 spline = spline_chooser(**study.best_params)
                 # -- instantiate polynomial transformer if relevant kwargs included
                 poly = poly_chooser(**study.best_params)
                 
                 # -- remove unnecessary params
-                list_params.remove('pca_value')
                 list_params.remove('spline_value')
                 list_params.remove('poly_value')
             else:
-                pca = spline = poly = None
+                spline = poly = None
+                
+            
+            # -- instantiate pca compression if relevant kwargs included, irrespective of whether spline or poly transformer is applied    
+            pca = pca_chooser(**study.best_params)
+            list_params.remove('pca_value')
             list_params.remove('feature_combo')
         else:
             pca = spline = poly = None
