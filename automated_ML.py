@@ -594,7 +594,7 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
         # -- select the fraction of the fold ...
         for idx_fold, fold in enumerate(indexes_train_kfold):
             
-            
+    
             # ... select a fold 
             fold_X_train = df_X_train.iloc[fold[0]]
             fold_X_test = df_X_train.iloc[fold[1]]
@@ -718,22 +718,15 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
             # -- suggest either to include feature combination or not
             feature_combo = trial.suggest_categorical("feature_combo", [False, True])
             
-            # # # -- instantiate spline transformer if relevant kwargs included
-            # spline = spline_chooser(feature_combo = feature_combo, trial = trial, **kwargs)
-            
             # -- if trial will try using feature combinations/compression
             if feature_combo == True:
-                # # -- instantiate pca compression if relevant kwargs included
-                # pca = pca_chooser(trial = trial, **kwargs)
-    
+
                 # -- instantiate spline transformer if relevant kwargs included
                 spline = spline_chooser(feature_combo = feature_combo, trial = trial, **kwargs)
                 
                 # -- instantiate polynomial transformer if relevant kwargs included
                 poly = poly_chooser(trial = trial, **kwargs)
             else:
-                # pca = poly = None
-                # pca = spline = poly = None
                 spline = poly = None
                 
             # -- instantiate pca compression if relevant kwargs included
