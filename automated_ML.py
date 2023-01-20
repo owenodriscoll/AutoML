@@ -208,9 +208,19 @@ def methodSelector(metric, random_state):
         param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
         
         if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
-            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)
-            param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, 400, log=False)
-            param_dict['eta'] = trial.suggest_float("eta", 1e-4, 1.0, log = True)
+            
+            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)  
+            
+            # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
+            if (param_dict['max_depth'] >= 10) :
+                max_n_estimators = 300; min_eta = 1e-3
+            if (param_dict['max_depth'] >= 13) :
+                max_n_estimators = 200; min_eta = 1e-2
+            else :
+                max_n_estimators = 400; min_eta = 1e-4
+                
+            param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, max_n_estimators, log=False) 
+            param_dict['eta'] = trial.suggest_float("eta", min_eta, 1.0, log = True)   
             param_dict['min_child_weight'] = trial.suggest_float("min_child_weight", 0, 10, log = False)
             param_dict['gamma'] = trial.suggest_float("gamma", 0, 10, log = False)
             param_dict['subsample'] = trial.suggest_float("subsample", 0.1, 1.0, log = False)
@@ -230,10 +240,19 @@ def methodSelector(metric, random_state):
     
     def catboostHParams(trial):
         param_dict = {}
-        param_dict['depth'] = trial.suggest_int("depth", 1, 10, log = False)
-        param_dict['iterations'] = trial.suggest_int("iterations", 20, 600, log = True)
+        param_dict['depth'] = trial.suggest_int("depth", 1, 12, log = False) # maybe increase?
+        
+        # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
+        if (param_dict['depth'] >= 8) :
+            max_iterations = 400; min_learning_rate = 1e-3
+        if (param_dict['depth'] >= 10) :
+            max_iterations = 300; min_learning_rate = 1e-2
+        else :
+            max_iterations = 500; min_learning_rate = 1e-3
+                
+        param_dict['iterations'] = trial.suggest_int("iterations", 20, max_iterations, log = True)
+        param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
         param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
-        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-3, 1e0, log = True)
         param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
         param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [20])
         param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
