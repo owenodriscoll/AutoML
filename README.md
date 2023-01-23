@@ -47,5 +47,6 @@ insert
 
 ## to do
 * add classification
+* add time serires support
 * add ability to restart training
 * add add classes?
