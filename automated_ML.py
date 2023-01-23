@@ -254,7 +254,8 @@ def methodSelector(metric, random_state):
         param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
         param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
         param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
-        param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [20])
+        param_dict['grow_policy'] = trial.suggest_categorical("grow_policy", ['SymmetricTree', 'Depthwise', 'Lossguide']) #!!! new
+        param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [5])
         param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
         param_dict['random_seed'] = trial.suggest_categorical("random_seed", [random_state])
         return param_dict
