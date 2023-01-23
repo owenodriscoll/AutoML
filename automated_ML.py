@@ -254,7 +254,7 @@ def methodSelector(metric, random_state):
         param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
         param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
         param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
-        param_dict['grow_policy'] = trial.suggest_categorical("grow_policy", ['SymmetricTree', 'Depthwise', 'Lossguide']) #!!! new
+        # param_dict['grow_policy'] = trial.suggest_categorical("grow_policy", ['SymmetricTree', 'Depthwise', 'Lossguide']) #!!! new
         param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [5])
         param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
         param_dict['random_seed'] = trial.suggest_categorical("random_seed", [random_state])
@@ -574,8 +574,6 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
             
     """
     
-    min_samples = int(np.ceil(len(X_train) * min(fit_frac) * (cross_validation.n_splits -1) / cross_validation.n_splits))
-    
     # -- turn train and test arrays into temporary dataframes
     df_X_train = pd.DataFrame(X_train)
     df_y_train = pd.DataFrame(y_train)
@@ -588,6 +586,12 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
 
     # -- For each fraction value...
     for idx_fraction, partial_fit_frac in enumerate(fit_frac):
+        
+        # -- when too few samples are available for assessment (less than 20 are used as the test fraction --> prun)
+        min_samples = int(np.ceil(len(X_train) * partial_fit_frac * (1) / cross_validation.n_splits))
+        if min_samples < 20:
+            raise optuna.TrialPruned()
+            return np.nan
         
         # -- prepare storage lists
         result_folds = []
