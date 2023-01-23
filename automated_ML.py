@@ -32,6 +32,7 @@ from sklearn.svm import LinearSVR
 
 # -- requires custom downloads
 from xgboost import XGBRegressor
+import catboost
 from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 
@@ -590,8 +591,8 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
         # -- when too few samples are available for assessment (less than 20 are used as the test fraction --> prun)
         min_samples = int(np.ceil(len(X_train) * partial_fit_frac * (1) / cross_validation.n_splits))
         if min_samples < 20:
-            raise optuna.TrialPruned()
-            return np.nan
+            # !!! add error condition/print when partial_fit_Frac = 1 while samples are still too low
+            continue
         
         # -- prepare storage lists
         result_folds = []
@@ -796,7 +797,7 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
                                             X_training = X_train, y_training = y_train, study = study , cross_validation = cross_validation, 
                                             fit_frac = fit_frac, random_state = random_state,
                                             poly_value = poly_value, spline_value = spline_value, pca_value = pca_value), # < -- optional poly, spline and pca attributes
-                           n_trials=n_trial, timeout=timeout)
+                           n_trials=n_trial, timeout=timeout, catch=(catboost.CatBoostError,))
             
             # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
             # here the study is saved once more to include the final iteration
