@@ -44,3 +44,8 @@ metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_p
 
 ## optuna_visualisation.py
 insert
+
+## to do
+* add classification
+* add ability to restart training
+* add add classes?
