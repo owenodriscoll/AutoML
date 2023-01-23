@@ -244,7 +244,7 @@ def methodSelector(metric, random_state):
         
         # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
         if (param_dict['depth'] >= 8) :
-            max_iterations = 400; min_learning_rate = 1e-3
+            max_iterations = 400; min_learning_rate = 5e-3 
         if (param_dict['depth'] >= 10) :
             max_iterations = 300; min_learning_rate = 1e-2
         else :
@@ -792,7 +792,7 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
                                             X_training = X_train, y_training = y_train, study = study , cross_validation = cross_validation, 
                                             fit_frac = fit_frac, random_state = random_state,
                                             poly_value = poly_value, spline_value = spline_value, pca_value = pca_value), # < -- optional poly, spline and pca attributes
-                           n_trials=n_trial, timeout=timeout, gc_after_trial = True)
+                           n_trials=n_trial, timeout=timeout)
             
             # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
             # here the study is saved once more to include the final iteration
