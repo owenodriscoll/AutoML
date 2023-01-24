@@ -213,10 +213,10 @@ def methodSelector(metric, random_state):
             param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)  
             
             # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-            if (param_dict['max_depth'] >= 10) :
-                max_n_estimators = 300; min_eta = 1e-3
             if (param_dict['max_depth'] >= 13) :
                 max_n_estimators = 200; min_eta = 1e-2
+            elif (param_dict['max_depth'] >= 10) :
+                max_n_estimators = 300; min_eta = 1e-3 # change to if >= 10, elif >= 8, else 
             else :
                 max_n_estimators = 400; min_eta = 1e-4
                 
@@ -244,10 +244,10 @@ def methodSelector(metric, random_state):
         param_dict['depth'] = trial.suggest_int("depth", 1, 12, log = False) # maybe increase?
         
         # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-        if (param_dict['depth'] >= 8) :
-            max_iterations = 400; min_learning_rate = 5e-3 
         if (param_dict['depth'] >= 10) :
             max_iterations = 300; min_learning_rate = 1e-2
+        elif (param_dict['depth'] >= 8) :
+            max_iterations = 400; min_learning_rate = 5e-3
         else :
             max_iterations = 500; min_learning_rate = 1e-3
                 
@@ -302,7 +302,7 @@ def methodSelector(metric, random_state):
         param_dict = {}
         param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error'])
         param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
-        param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 500, log = False)
+        param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 500, log = True)
         param_dict['max_leaf_nodes'] = trial.suggest_int("max_leaf_nodes", 2, 100)
         param_dict['min_samples_leaf'] = trial.suggest_int("min_samples_leaf", 2, 200)
         param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1.0, log = True)
