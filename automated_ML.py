@@ -19,22 +19,13 @@ import warnings
 from optuna.samplers import TPESampler #, RandomSampler
 from sklearn.model_selection import KFold
 from sklearn.compose import TransformedTargetRegressor
-from sklearn.metrics import median_absolute_error, r2_score, make_scorer
+from sklearn.metrics import median_absolute_error, r2_score
 from sklearn.pipeline import Pipeline
 
-# -- following imports are only required if selected in list_regressor_hyper, else they can be commented out here ...
-# ... and removed the 'methodSelector' functions and `regressors`, `regressors_id` and `regressors_dict` lines
-from sklearn.linear_model import LassoLars, Ridge, ElasticNet, BayesianRidge, SGDRegressor
-from sklearn.ensemble import AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor, BaggingRegressor, StackingRegressor
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.dummy import DummyRegressor
-from sklearn.svm import LinearSVR
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import Ridge
 
-# -- requires custom downloads
-from xgboost import XGBRegressor
-import catboost
-from catboost import CatBoostRegressor
-from lightgbm import LGBMRegressor
+from regressors_ import regressor_selector
 
 #%%
 
@@ -110,8 +101,8 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         
     ------------------------------------
     Note: 
-        1. Parameters poly_value, spline_value and pca_value are optional. Even when they are submitted, optimization might favour excluding them. 
-           Poly_value and spline_value generally improve linear models but add little to boosted models. pca_value serves as compression.
+        1. Parameters poly_value and spline_value are optional. Even when they are submitted, optimization might favour excluding them. 
+           Poly_value and spline_value generally improve linear models but add little to boosted models.
            When all three are included they are performed on the data in the following order: poly_value --> spline_value --> (optional scaler) --> pca_value 
         2. cross_validation, sampler and pruner are set to the standard versions when None is supplied
     
@@ -129,7 +120,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     list_regressors_training = list_regressors_hyper if list_regressors_training == None else list_regressors_training
     
     # -- select method(s) of regression to perform
-    methods = methodSelector(metric = metric_optimise, random_state = random_state)
+    methods = regressor_selector(regressor_names = list_regressors_hyper, random_state = random_state)
     
     # -- create storage location
     if not os.path.exists(write_folder):
@@ -151,7 +142,7 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     # -- fit regressors using optimised hyperparameters -- #
     ########################################################
     
-    estimators = regressor_fit(list_regressors_training, write_folder)
+    estimators = regressor_fit(list_regressors_training, methods, write_folder)
     
     ########################################################################
     # -- train regressors (including stacked) and calculate performance -- #
@@ -165,207 +156,6 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     sys.stdout = old_stdout
     
     return performance_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test
-        
-
-# -- create dictionary whose keys call respective regressors
-regressors= [DummyRegressor, LGBMRegressor, XGBRegressor, CatBoostRegressor, BayesianRidge, LassoLars, AdaBoostRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor,
-             KNeighborsRegressor, SGDRegressor, BaggingRegressor, LinearSVR, ElasticNet]
-regressor_id= ['dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet']
-regressor_dict = dict(zip(regressor_id, regressors))
-
-def methodSelector(metric, random_state):
-
-    def dummyHParams(trial):
-        param_dict = {}
-        param_dict['strategy'] = trial.suggest_categorical("strategy", ['mean', 'median', 'quantile'])
-        if param_dict['strategy'] == 'quantile':
-            param_dict['quantile'] = trial.suggest_float("quantile", 0., 1., step = 0.01)
-        return param_dict
-    
-    def lightgbmHParams(trial):
-        param_dict = {}
-        param_dict['objective'] = trial.suggest_categorical("objective", ['regression'])
-        param_dict['max_depth'] = trial.suggest_int('max_depth', 3, 20)
-        param_dict['n_estimators'] = trial.suggest_int('n_estimators', 50, 2000, log = True)
-        param_dict['max_bin'] = trial.suggest_categorical("max_bin", [63, 127, 255, 511, 1023])   # performance boost when power of 2 (-1)
-        param_dict['min_gain_to_split'] = trial.suggest_float("min_gain_to_split", 0, 15)  # boosts speed, decreases performance though
-        param_dict['lambda_l1'] = trial.suggest_float('lambda_l1', 1e-8, 10.0, log = True)
-        param_dict['lambda_l2'] = trial.suggest_float('lambda_l2', 1e-8, 10.0, log = True)
-        param_dict['num_leaves'] = trial.suggest_int('num_leaves', 2, 256)
-        param_dict['feature_fraction'] = trial.suggest_float('feature_fraction', 0.1, 1.0)
-        param_dict['bagging_fraction'] = trial.suggest_float('bagging_fraction', 0.1, 1.0)
-        param_dict['bagging_freq'] = trial.suggest_int('bagging_freq', 1, 7)
-        param_dict['min_child_samples'] = trial.suggest_int('min_child_samples', 1, 100)
-        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [-1])
-        return param_dict
-    
-    def xgboostHParams(trial):
-        param_dict = {}
-        param_dict['booster'] = trial.suggest_categorical("booster", ['gbtree', 'gblinear', 'dart'])
-        param_dict['lambda'] = trial.suggest_float("lambda", 1e-8, 10.0, log = True)
-        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 10.0, log = True)
-        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
-        
-        if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
-            
-            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)  
-            
-            # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-            if (param_dict['max_depth'] >= 13) :
-                max_n_estimators = 200; min_eta = 1e-2
-            elif (param_dict['max_depth'] >= 10) :
-                max_n_estimators = 300; min_eta = 1e-3 # change to if >= 10, elif >= 8, else 
-            else :
-                max_n_estimators = 400; min_eta = 1e-4
-                
-            param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, max_n_estimators, log=False) 
-            param_dict['eta'] = trial.suggest_float("eta", min_eta, 1.0, log = True)   
-            param_dict['min_child_weight'] = trial.suggest_float("min_child_weight", 0, 10, log = False)
-            param_dict['gamma'] = trial.suggest_float("gamma", 0, 10, log = False)
-            param_dict['subsample'] = trial.suggest_float("subsample", 0.1, 1.0, log = False)
-            param_dict['colsample_bytree'] = trial.suggest_float("colsample_bytree", 0.1, 1.0, log = False)
-            param_dict['max_bin'] = trial.suggest_categorical("max_bin", [64, 128, 256, 512, 1024])    # performance boost when power of 2 (NOT -1)
-            
-            if (param_dict['booster'] == 'dart') :
-                param_dict['sample_type'] = trial.suggest_categorical("sample_type", ['uniform', 'weighted'])
-                param_dict['normalize_type'] = trial.suggest_categorical("normalize_type", ['tree', 'forest'])
-                param_dict['rate_drop'] = trial.suggest_float("rate_drop", 0., 1.0, log = False)
-                param_dict['one_drop'] = trial.suggest_categorical("one_drop", [0, 1])
-                
-        elif (param_dict['booster'] == 'gblinear') :
-            param_dict['updater'] = trial.suggest_categorical("updater", ['shotgun', 'coord_descent'])
-            param_dict['feature_selector'] = trial.suggest_categorical("feature_selector", ['cyclic', 'shuffle'])
-        return param_dict
-    
-    def catboostHParams(trial):
-        param_dict = {}
-        param_dict['depth'] = trial.suggest_int("depth", 1, 12, log = False) # maybe increase?
-        
-        # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-        if (param_dict['depth'] >= 10) :
-            max_iterations = 300; min_learning_rate = 1e-2
-        elif (param_dict['depth'] >= 8) :
-            max_iterations = 400; min_learning_rate = 5e-3
-        else :
-            max_iterations = 500; min_learning_rate = 1e-3
-                
-        param_dict['iterations'] = trial.suggest_int("iterations", 20, max_iterations, log = True)
-        param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
-        param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
-        param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
-        # param_dict['grow_policy'] = trial.suggest_categorical("grow_policy", ['SymmetricTree', 'Depthwise', 'Lossguide']) #!!! new
-        param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [5])
-        param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
-        param_dict['random_seed'] = trial.suggest_categorical("random_seed", [random_state])
-        return param_dict
-    
-    def bayesianRidgeHParams(trial):
-        param_dict = {}
-        param_dict['n_iter'] = trial.suggest_int("n_iter", 10, 400)
-        param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2)
-        param_dict['alpha_1'] =  trial.suggest_float("alpha_1", 1e-8, 1e2, log = True)
-        param_dict['alpha_2'] = trial.suggest_float("alpha_2", 1e-8, 1e2, log = True)
-        param_dict['lambda_1'] = trial.suggest_float("lambda_1", 1e-8, 1e2, log = True)
-        param_dict['lambda_2'] = trial.suggest_float("lambda_2", 1e-8, 1e2, log = True)
-        return param_dict
-    
-    def lassoLarsHParams(trial):
-        param_dict = {}
-        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-        param_dict['normalize'] = trial.suggest_categorical("normalize", [False])
-        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def adaBoostHParams(trial):
-        param_dict = {}
-        param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, 200)
-        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
-        param_dict['loss'] = trial.suggest_categorical("loss", ['linear', 'square', 'exponential'])
-        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def gradBoostHParams(trial):
-        param_dict = {}
-        param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, 300)
-        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
-        param_dict['subsample'] = trial.suggest_float("subsample", 1e-2, 1.0, log = False)
-        param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 10)
-        param_dict['criterion'] = trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error'])
-        param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'huber', 'quantile'])
-        param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20])
-        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def histGradBoostHParams(trial):
-        param_dict = {}
-        param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error'])
-        param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
-        param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 500, log = True)
-        param_dict['max_leaf_nodes'] = trial.suggest_int("max_leaf_nodes", 2, 100)
-        param_dict['min_samples_leaf'] = trial.suggest_int("min_samples_leaf", 2, 200)
-        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1.0, log = True)
-        # param_dict['scoring'] = trial.suggest_categorical("scoring", [make_scorer(metric)])
-        param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20]) 
-        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def KNearNeighboursHParams(trial):
-        param_dict = {}
-        param_dict['n_neighbors'] = trial.suggest_int("n_neighbors", 1, 101, step = 5)
-        param_dict['weights'] = trial.suggest_categorical("weights", ['uniform', 'distance'])
-        return param_dict
-    
-    def sgdHParams(trial):
-        param_dict = {}
-        param_dict['loss'] =  trial.suggest_categorical("loss", ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'])
-        param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet'])
-        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def baggingHParams(trial):
-        param_dict = {}
-        param_dict['n_estimators'] =  trial.suggest_int("n_estimators", 1, 101, step = 5)
-        param_dict['max_features'] = trial.suggest_float("max_features", 1e-1, 1.0, step = 0.1)
-        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def svrHParams(trial):
-        param_dict = {}
-        param_dict['loss'] = trial.suggest_categorical("loss", ['epsilon_insensitive', 'squared_epsilon_insensitive'])
-        param_dict['C'] = trial.suggest_float("C", 1e-5, 1e2, log = True)
-        param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2, log = True)
-        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    def elasticnetHParams(trial):
-        param_dict = {}
-        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-        param_dict['l1_ratio'] = trial.suggest_float("l1_ratio", 1e-5, 1.0, log = True)
-        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-        return param_dict
-    
-    # possible regressors
-    methods = {
-        "dummy":( DummyRegressor, dummyHParams),
-        "lightgbm": (LGBMRegressor, lightgbmHParams),
-        "xgboost": (XGBRegressor, xgboostHParams),
-        "catboost": (CatBoostRegressor, catboostHParams),
-        "bayesianridge": (BayesianRidge, bayesianRidgeHParams),
-        "lassolars": (LassoLars, lassoLarsHParams),
-        "adaboost": (AdaBoostRegressor, adaBoostHParams),
-        "gradientboost": (GradientBoostingRegressor, gradBoostHParams),
-        "histgradientboost": (HistGradientBoostingRegressor, histGradBoostHParams),
-        "knn": (KNeighborsRegressor, KNearNeighboursHParams),
-        "sgd": (SGDRegressor, sgdHParams),
-        "bagging": (BaggingRegressor, baggingHParams),
-        "svr": (LinearSVR, svrHParams),
-        "elasticnet": (ElasticNet, elasticnetHParams),
-        }
-    
-    return methods
 
 
 def splitTrainTest(x_data, y_validation, testSize = 0.3, randomState = 42, n_splits = 1, smote = False, equalSizedClasses = False, classToIgnore = None, continuous = False):
@@ -706,8 +496,6 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
         
     """
     
-    
-    
     def objective(trial):
     
         # save optuna study
@@ -779,6 +567,13 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
         # -- only select specified regressors
         methods_filt = {regressor_key: methods[regressor_key] for regressor_key in list_regressors_hyper}
         
+        # -- if catboost is loaded prepare special catch for common catboost errors
+        if 'catboost' in list(methods_filt.keys()):
+            import catboost
+            catch = (catboost.CatBoostError,)
+        else:
+            catch = ( )
+        
         for regressor_name, (regressor, create_params) in methods_filt.items():
             study = optuna.create_study(direction = optimisation_direction, sampler = sampler, pruner = pruner)
             
@@ -797,7 +592,7 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
                                             X_training = X_train, y_training = y_train, study = study , cross_validation = cross_validation, 
                                             fit_frac = fit_frac, random_state = random_state,
                                             poly_value = poly_value, spline_value = spline_value, pca_value = pca_value), # < -- optional poly, spline and pca attributes
-                           n_trials=n_trial, timeout=timeout, catch=(catboost.CatBoostError,))
+                           n_trials=n_trial, timeout=timeout, catch=catch)
             
             # the study is saved during each trial to update with the previous trial (this stores the data even if the study does not complete)
             # here the study is saved once more to include the final iteration
@@ -805,7 +600,7 @@ def regressor_optimise(methods, optimisation_direction, list_regressors_hyper, X
          
         return
     
-def regressor_fit(list_regressors_training, write_folder):
+def regressor_fit(list_regressors_training, methods, write_folder):
     """
     Loads hyperoptimisation trials for regressors specified in list_regressors_training, located in write_folder. 
     Selects hyperparameters belonging to best trial and outputs a list of tuples containing optimized regressor name with corresponding pipeline
@@ -870,7 +665,7 @@ def regressor_fit(list_regressors_training, write_folder):
             ('scaler', scaler_chooser(study.best_params['scalers'])),
             ('pca', pca),
             ('model', TransformedTargetRegressor(
-                    regressor = regressor_dict[regressor_name](**parameter_dict), 
+                    regressor = methods[regressor_name][0](**parameter_dict),  # index 0 is the regressor, index 1 is hyperoptimization function
                     transformer= transformer_chooser(study.best_params['transformers'], n_quantiles = n_quantiles )
                     ))]
             )
