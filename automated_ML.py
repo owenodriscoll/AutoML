@@ -38,16 +38,16 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
                          fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1], random_state = 42, warning_verbosity = 'ignore'):
     
     """
-    ------------------------------------
-    Summary:
+    Summary
+    -------
         1. Takes two dataframes containing validation data (y) and input variables (X).
         2. Splits this data into testing and training subsets 
         3. Performs optuna hyperparameter optimisation per specified regressors on training data
         4. Trains individual regressors using optimized hyperparameters and creates 'stacked' regressor
         5. Assess performance of final stacked regressor
         
-    ------------------------------------
-    Input:
+    Input
+    -----
         y: dataframe, dependent data of size n x 1 with n obervations for valdiation
         X: dataframe, independent data of size n x M with n observations for M parameters
         test_frac: float, fraction of data to use for testing subset
@@ -68,20 +68,22 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
         list_regressors_hyper: list of str, containing names of regressors for which to apply hyperparameter optimisation. 
             Options are : 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_training: list of parameters to train and assess on performance. Listed regressors must be present in write_folder
-        fit_frac: 
+        fit_frac: list of float, fractions of training data on which to assess training performance. Allows for pruning. 
+                  Must be greater than 0. and contain 1.0 (if you want to train on the full training dataset), e.g. [0.2, 0.5, 1.]
         random_state: int, set random state for reproducibility
         warning_verbosity: str, warning setting for 'UserWarning', defaults to ignore (prevents command line from getting clogged). Automatically reverts back to 'default' after function complete
         
-    ------------------------------------
-    Output:
+    Returns
+    -------
         metric_performance_summary_dict: dict, contains mean and std. performance per metric per regressor in list_regressors_training
         idexes_test_kfold: list of tuples of numpary arrays, contains fold training and test indexes for test dataset
         test_index: array, indexes of test fraction
         train_index: array, indexes of training fraction
         y_pred: array, contains estimates of y predicted on the test dataset
         y_test: array, contains validation values of y
-    ------------------------------------
-    Example:
+    
+    Example
+    -------
         
         import sklearn
         import pandas as pd
@@ -94,13 +96,13 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
 
         metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test = automated_regression(
             y = y, X = X, test_frac = 0.2, timeout = 600, n_trial = 100, 
-            metric_optimise = sklearn.metrics.mean_pinball_loss,  metric_assess = [sklearn.metrics.mean_pinball_loss, sklearn.metrics.mean_squared_error, sklearn.metrics.r2_score],
+            metric_optimise = sklearn.metrics.mean_pinball_loss,  metric_assess = [sklearn.metrics.mean_pinball_loss, sklearn.metrics.r2_score],
             optimisation_direction = 'minimize',  overwrite = True, 
             list_regressors_hyper = ['lightgbm', 'bayesianridge'], list_regressors_training = None, 
             random_state = 42)
         
-    ------------------------------------
-    Note: 
+    Note 
+    ----
         1. Parameters poly_value and spline_value are optional. Even when they are submitted, optimization might favour excluding them. 
            Poly_value and spline_value generally improve linear models but add little to boosted models.
            When all three are included they are performed on the data in the following order: poly_value --> spline_value --> (optional scaler) --> pca_value 
@@ -355,10 +357,11 @@ def model_performance(trial, X_train, y_train, cross_validation, pipeline, study
         cross_validation: method of cross valdiation for splitting data into folds
         pipeline: pipeline serving as a regressor for which the optuna trial is optimizing
                   i.e. the pipeline is the regressor being tested
-        study_name:
-        metric:
-        fit_frac:
-        random_state
+        study_name: str, custom name to save study in folder
+        metric: function, metric on which to optimise hyperparameters. Takes y_true and y_pred. E.g. sklearn's median_absolute_error, mean_absolute_error, r2_score etc
+        fit_frac: list of float, fractions of training data on which to assess training performance. Allows for pruning. 
+                  Must be greater than 0. and contain 1.0 (if you want to train on the full training dataset), e.g. [0.2, 0.5, 1.]
+        random_state: int, set random state for reproducibility
                   
     Output:
         result_folds_fracs: 
@@ -486,9 +489,10 @@ def create_objective(study_name, write_path, regressor_class, create_params, X_t
         y_training: n x 1 array, dependent training data
         study: optuna optimisation study 
         cross_validation: method of cross validation
-        metric: function, optimisation metric used to measure optimasation performance e.g. metric = sklearn.metrics.r2_score
-        fit_frac:
-        random_state:
+        metric: function, metric on which to optimise hyperparameters. Takes y_true and y_pred. E.g. sklearn's median_absolute_error, mean_absolute_error, r2_score etc
+        fit_frac: list of float, fractions of training data on which to assess training performance. Allows for pruning. 
+                  Must be greater than 0. and contain 1.0 (if you want to train on the full training dataset), e.g. [0.2, 0.5, 1.]
+        random_state: int, set random state for reproducibility
         kwargs: 
             pca_value: int or float, pca compression to apply after scaling of X matrix
             poly_value: int, creates polynomial expension of degree i of X matrix
