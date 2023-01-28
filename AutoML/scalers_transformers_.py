@@ -25,33 +25,15 @@ class FuncHelper:
             print("Input argument not of type: int, float or dict")
 
 
-def input_type_fit(f):
-    def wrapper(args):
-
-        assert all([variable in dir(args) for variable in ['func', 'arg']]), "Required variables not provided to class"
-
-        if isinstance(args.arg, (int, float)):
-            return args.func(args.arg)
-        elif isinstance(args.arg, dict):
-            return args.func(**args.arg)
-        elif isinstance(args.arg, type(None)):
-            return None
-        else:
-            print("Input argument not of type: int, float or dict")
-
-    return wrapper
-
-
-def input_type_report(f):
-    def wrapper(args):
-
-        assert 'func_fit' in dir(args), "Required variable not provided to class"
-        if isinstance(args.func_fit, type(None)):
-            return None
-        else:
-            return f
-
-    return wrapper
+def input_type_report(variable):
+    def warp(f):
+        def wrapper(self):
+            if isinstance(getattr(self, variable), type(None)):
+                return None
+            else:
+                return f(self)
+        return wrapper
+    return warp
 
 
 class chooser:
@@ -65,10 +47,11 @@ class chooser:
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func, self.arg)
 
-    @input_type_report
+    @input_type_report("func_fitted")
     def _report_trial(self):
-        # return self.trial.suggest_categorical(self.transformer, [self.func_fit.get_params()])
-        return print([self.func_fitted.get_params()])
+        # self.trial.suggest_categorical(self.transformer, [self.func_fit.get_params()])
+        print(self.func_fitted.get_params())
+        pass
 
     def fit_report_trial(self) -> callable:
         self.fit()
@@ -78,7 +61,7 @@ class chooser:
 
 class pcaChooser(chooser):
     def __init__(self, arg, trial=None):  # change to args
-        super().__init__(arg=arg, func=PCA, transformer='pca_value')              # change to args
+        super().__init__(arg=arg, func=PCA, transformer='pca_value')  # change to args
 
 
 class polyChooser(chooser):
@@ -91,18 +74,13 @@ class splineChooser(chooser):
         super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value')
 
 
-# %%
 pca = pcaChooser(3)
 pca.fit()
 pca._report_trial()
+pcaChooser(3).fit_report_trial()
 test = pcaChooser(3)
-
 spline = splineChooser(3).fit_report_trial()
-
 spline = splineChooser(None).fit_report_trial()
-
-
-# %%
 
 
 def scaler_chooser(scaler_str):
