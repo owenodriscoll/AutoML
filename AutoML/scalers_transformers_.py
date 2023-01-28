@@ -6,6 +6,11 @@ Created on Fri Jan 27 16:11:20 2023
 @author: owen
 """
 
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import SplineTransformer
+
+
 def input_type_fit(f):
     def wrapper(args):
         
@@ -21,6 +26,7 @@ def input_type_fit(f):
             print("Input argument not of type: int, float or dict")
     return wrapper
 
+
 def input_type_report(f):
     def wrapper(args):
         
@@ -30,13 +36,15 @@ def input_type_report(f):
         else:
             return f
     return wrapper
-        
+
 
 class chooser:
-    def __init__(self, arg, trial = None):
+    def __init__(self, arg, func, transformer, trial = None): # change to args
         self.arg = arg
+        self.func = func
+        self.transformer = transformer
         self.trial = trial
-        
+
     def fit(self):
         @input_type_fit
         def _fit(self):
@@ -46,12 +54,12 @@ class chooser:
         self.func_fit = func_fit
 
         return func_fit
-    
+
     @input_type_report
     def _report_trial(self):
         # return self.trial.suggest_categorical(self.transformer, [self.func_fit.get_params()])
         return print([self.func_fit.get_params()])
-    
+
     def fit_report_trial(self):
         self.fit()
         self._report_trial()
@@ -60,36 +68,23 @@ class chooser:
 
 class pcaChooser(chooser):
 
-    def __init__(self, arg, trial = None):
-        super().__init__(arg)
-        
-        from sklearn.decomposition import PCA
-        
-        self.func = PCA
-        self.transformer = 'pca_value'
-        
-        
+    def __init__(self, arg, trial = None): # change to args
+        super().__init__(arg = arg, func = PCA, transformer = 'pca_value')              # change to args
+
+
 class polyChooser(chooser):
 
     def __init__(self, arg, trial = None):
-        super().__init__(arg)
-        
-        from sklearn.preprocessing import PolynomialFeatures
-        
-        self.func = PolynomialFeatures
-        self.transformer = 'poly_value'
-      
-        
+        super().__init__(arg = arg, func = PolynomialFeatures, transformer = 'poly_value')
+
+
 class splineChooser(chooser):
 
     def __init__(self, arg, trial = None):
-        super().__init__(arg)
-        
-        from sklearn.preprocessing import SplineTransformer
-        
-        self.func = SplineTransformer
-        self.transformer = 'spline_value'
-        
+        super().__init__(arg = arg, func = SplineTransformer, transformer = 'spline_value')
+
+
+
 #%%
     
 pca = pcaChooser(3)
