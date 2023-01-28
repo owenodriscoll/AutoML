@@ -6,31 +6,97 @@ Created on Fri Jan 27 16:11:20 2023
 @author: owen
 """
 
+from functools import singledispatchmethod
+
+
+
 class chooser:
     
-    def __init__(self, arg, *, trial = None):
+    def __init__(self, arg, transformer = None, func= None, trial = None):
         self.arg = arg
+        self.transformer = transformer
+        self.func = func
         self.trial = trial
         
-    # @type_decorrator           # first decorate the getter method
-    # def get_type(self): # This getter method name is *the* name
-    #     return type(arg)
+    # add @ wrapper function to always include is instance check
+    def fit(self):      
+        if isinstance(self.arg, (int, float)):
+            func_fit = self.func(self.arg)
+            # return self.func(self.arg)
+        elif isinstance(self.arg, dict):
+            func_fit = self.func(**self.arg)
+            # return self.func(**self.arg)
+        elif isinstance(self.arg, type(None)):
+            func_fit = None
+        self.func_fit = func_fit
+        # return func_fit
         
+        return 
+    
+    # add instance check so that 
+    def report_trial(self):
+        # return self.trial.suggest_categorical(self.transformer, [self.func.get_params()])
+        return print([self.func_fit.get_params()])
+    
+    def fit_report_trial(self):
+        self.fit()
+        self.report_trial()
+        return self.func_fit
+
+
+class pcaChooser(chooser):
+
+    def __init__(self, arg, trial = None):
+        super().__init__(arg)
         
-class scalerChooser(chooser):
+        from sklearn.decomposition import PCA
+        func = PCA
+        transformer = 'pca_value'
+        
+        self.func = func
+        self.transformer = transformer
+        
+pca = pcaChooser(3)
+test = pcaChooser(3).fit_report_trial()
+        
+class polyChooser(chooser):
+
+    def __init__(self, arg, trial = None):
+        super().__init__(arg)
+        
+        from sklearn.preprocessing import PolynomialFeatures
+        func = PolynomialFeatures
+        transformer = 'poly_value'
+        
+        self.func = func
+        self.transformer = transformer
+        
+class splineChooser(chooser):
+
+    def __init__(self, arg, trial = None):
+        super().__init__(arg)
+        
+        from sklearn.preprocessing import SplineTransformer
+        func = SplineTransformer
+        transformer = 'spline_value'
+        
+        self.func = func
+        self.transformer = transformer
+        
     
-    from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
     
-    options = {"minmax": MinMaxScaler(), "standard": StandardScaler(), "robust": RobustScaler()}
     
-    return None
-    
+
+
         
         
 test = chooser('str')   
 def type_decorrator(func):
     
 
+
+    from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
+    options = {"minmax": MinMaxScaler(), "standard": StandardScaler(), "robust": RobustScaler()}
 
   
 def scaler_chooser(scaler_str):
