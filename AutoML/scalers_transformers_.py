@@ -11,11 +11,24 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.preprocessing import SplineTransformer
 
 
+class FuncHelper:
+    @staticmethod
+    def run_with_argument(func, arg):
+
+        if isinstance(arg, (int, float)):
+            return func(arg)
+        if isinstance(arg, dict):
+            return func(**arg)
+        elif isinstance(arg, type(None)):
+            return None
+        else:
+            print("Input argument not of type: int, float or dict")
+
+
 def input_type_fit(f):
     def wrapper(args):
 
-        assert all([variable in dir(args) for variable in ['func', 'arg']]
-                   ), "Required variables not provided to class"
+        assert all([variable in dir(args) for variable in ['func', 'arg']]), "Required variables not provided to class"
 
         if isinstance(args.arg, (int, float)):
             return args.func(args.arg)
@@ -25,47 +38,42 @@ def input_type_fit(f):
             return None
         else:
             print("Input argument not of type: int, float or dict")
+
     return wrapper
 
 
 def input_type_report(f):
     def wrapper(args):
 
-        assert 'func_fit' in dir(
-            args),  "Required variable not provided to class"
+        assert 'func_fit' in dir(args), "Required variable not provided to class"
         if isinstance(args.func_fit, type(None)):
             return None
         else:
-            return f(args)
+            return f
+
     return wrapper
 
 
 class chooser:
-    def __init__(self, arg, func, transformer, trial=None):  # change to args
+    def __init__(self, arg: any, func: callable, transformer, trial=None):  # change to args
+        self.func_fitted = None
         self.arg = arg
         self.func = func
         self.transformer = transformer
         self.trial = trial
 
     def fit(self):
-        @input_type_fit
-        def _fit(self):
-            pass
-
-        func_fit = _fit(self)
-        self.func_fit = func_fit
-
-        return func_fit
+        self.func_fitted = FuncHelper.run_with_argument(self.func, self.arg)
 
     @input_type_report
     def _report_trial(self):
         # return self.trial.suggest_categorical(self.transformer, [self.func_fit.get_params()])
-        return print([self.func_fit.get_params()])
+        return print([self.func_fitted.get_params()])
 
-    def fit_report_trial(self):
+    def fit_report_trial(self) -> callable:
         self.fit()
         self._report_trial()
-        return self.func_fit
+        return self.func_fitted
 
 
 class pcaChooser(chooser):
