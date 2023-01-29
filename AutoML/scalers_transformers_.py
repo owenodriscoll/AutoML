@@ -25,18 +25,18 @@ class FuncHelper:
             print("Input argument not of type: int, float or dict")
 
 
-def input_type_report(variable):
-    def warp(f):
-        def wrapper(self):
-            if isinstance(getattr(self, variable), type(None)):
+def decorator_report(variable):
+    def wrap_function(f):
+        def wrap_arguments(args):
+            if isinstance(getattr(args, variable), type(None)):
                 return None
             else:
-                return f(self)
-        return wrapper
-    return warp
+                return f(args)
+        return wrap_arguments
+    return wrap_function
 
 
-class chooser:
+class Chooser:
     def __init__(self, arg: any, func: callable, transformer, trial=None):  # change to args
         self.func_fitted = None
         self.arg = arg
@@ -47,7 +47,7 @@ class chooser:
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func, self.arg)
 
-    @input_type_report("func_fitted")
+    @decorator_report("func_fitted")
     def _report_trial(self):
         # self.trial.suggest_categorical(self.transformer, [self.func_fit.get_params()])
         print(self.func_fitted.get_params())
@@ -59,19 +59,19 @@ class chooser:
         return self.func_fitted
 
 
-class pcaChooser(chooser):
+class PcaChooser(Chooser):
     def __init__(self, arg, trial=None):  # change to args
-        super().__init__(arg=arg, func=PCA, transformer='pca_value')  # change to args
+        super().__init__(arg=arg, func=PCA, transformer='pca_value', trial=trial)  # change to args
 
 
-class polyChooser(chooser):
+class PolyChooser(Chooser):
     def __init__(self, arg, trial=None):
-        super().__init__(arg=arg, func=PolynomialFeatures, transformer='poly_value')
+        super().__init__(arg=arg, func=PolynomialFeatures, transformer='poly_value', trial=trial)
 
 
-class splineChooser(chooser):
+class SplineChooser(Chooser):
     def __init__(self, arg, trial=None):
-        super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value')
+        super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value', trial=trial)
 
 
 pca = pcaChooser(3)
@@ -80,7 +80,13 @@ pca._report_trial()
 pcaChooser(3).fit_report_trial()
 test = pcaChooser(3)
 spline = splineChooser(3).fit_report_trial()
-spline = splineChooser(None).fit_report_trial()
+spline_2 = splineChooser(None).fit_report_trial()
+
+class ScalerChooser(Chooser):
+
+    def suggest_trial(self):
+
+
 
 
 def scaler_chooser(scaler_str):
@@ -110,7 +116,7 @@ def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_sta
     elif transformer_str == "quantile_trans":
 
         # -- if optuna trial is provided to function determine optimal number of quantiles
-        if trial != None:
+        if not trial is None:
             n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
 
         return QuantileTransformer(n_quantiles=n_quantiles, output_distribution="normal", random_state=random_state)
