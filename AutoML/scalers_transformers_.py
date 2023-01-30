@@ -38,11 +38,11 @@ def decorator_report(variable):
 
 class Chooser:
     def __init__(self, arg: any, func: callable, transformer, trial=None):  # change to args
-        self.func_fitted = None
         self.arg = arg
         self.func = func
         self.transformer = transformer
         self.trial = trial
+        self.func_fitted = None
 
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func, self.arg)
@@ -74,17 +74,34 @@ class SplineChooser(Chooser):
         super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value', trial=trial)
 
 
-pca = pcaChooser(3)
+pca = PcaChooser(3)
 pca.fit()
 pca._report_trial()
-pcaChooser(3).fit_report_trial()
-test = pcaChooser(3)
-spline = splineChooser(3).fit_report_trial()
-spline_2 = splineChooser(None).fit_report_trial()
+PcaChooser(3).fit_report_trial()
+test = PcaChooser(3)
+spline = SplineChooser(3).fit_report_trial()
+spline_2 = SplineChooser(None).fit_report_trial()
 
-class ScalerChooser(Chooser):
+class ScalerChooser:
+    def __init__(self, arg: str, transformer='scaler', trial=None):
+        self.transformer = transformer
+        self.arg = arg
+        self.trial = trial
 
     def suggest_trial(self):
+        # self.trial.suggest_categorical("scalers", [None, MinMaxScaler(), StandardScaler(), RobustScaler()])
+        print(self.transformer)
+
+    def string_to_func(self):
+        if self.arg == "minmax":
+            return MinMaxScaler()
+        elif self.arg == "standard":
+            return StandardScaler()
+        elif self.arg == "robust":
+            return RobustScaler()
+        else:
+            print("No valid argument string provided")
+
 
 
 
