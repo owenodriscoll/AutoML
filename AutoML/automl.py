@@ -25,7 +25,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 
-from regressors_ import regressor_selector
+from AutoML.AutoML.regressors_ import regressor_selector
 
 #%%
 
