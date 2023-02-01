@@ -5,10 +5,13 @@ Created on Fri Jan 27 16:11:20 2023
 
 @author: owen
 """
+from typing import Optional, Any
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.preprocessing import SplineTransformer
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
+from sklearn.preprocessing import QuantileTransformer
 
 
 class FuncHelper:
@@ -32,12 +35,14 @@ def decorator_report(variable):
                 return None
             else:
                 return f(args)
+
         return wrap_arguments
+
     return wrap_function
 
 
 class Chooser:
-    def __init__(self, arg: any, func: callable, transformer, trial=None):  # change to args
+    def __init__(self, arg: any, func: callable, transformer: str, trial=None):  # change to args
         self.arg = arg
         self.func = func
         self.transformer = transformer
@@ -82,43 +87,52 @@ test = PcaChooser(3)
 spline = SplineChooser(3).fit_report_trial()
 spline_2 = SplineChooser(None).fit_report_trial()
 
-class ScalerChooser:
-    def __init__(self, arg: str, transformer='scaler', trial=None):
-        self.transformer = transformer
+
+class ScalerChooser(Chooser):
+    def __init__(self, arg: str = '', transformer: str = 'scaler', trial=None):
         self.arg = arg
+        self.transformer = transformer
         self.trial = trial
+        self.func = None
 
     def suggest_trial(self):
-        # self.trial.suggest_categorical("scalers", [None, MinMaxScaler(), StandardScaler(), RobustScaler()])
-        print(self.transformer)
+        # self.arg = self.trial.suggest_categorical(self.transformer, [None, "minmax", "standard", "robust"])
+        self.arg = "minmax"
+        return self
 
     def string_to_func(self):
         if self.arg == "minmax":
-            return MinMaxScaler()
+            self.func = MinMaxScaler
         elif self.arg == "standard":
-            return StandardScaler()
+            self.func = StandardScaler
         elif self.arg == "robust":
-            return RobustScaler()
-        else:
-            print("No valid argument string provided")
+            self.func = RobustScaler
+        return self
+
+# ScalerChooser().suggest_trial().string_to_func().func()
+
+class TransformerChooser(Chooser):
+
+    def __init__(self, trial=None, random_state: int = 42):
+        self.random_state = random_state
+        self.trial = trial
+        self.func = QuantileTransformer
 
 
 
+    def suggest_trial(self):
+        #transform_type = trial.suggest_categorical("transformers", ['none', 'quantile_trans'])
+        transform_type = 'quantile_trans'
+        if not transform_type == 'none':
+            # self.n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
+            self.n_quantiles = 400
+            #self.func = QuantileTransformer(n_quantiles=self.n_quantiles, output_distribution="normal", random_state=self.random_state)
+        return self
 
+    def fit(self):
+        self.func_fitted = FuncHelper.run_with_argument(self.func.set_params, self.n_quantiles)
+        return self
 
-def scaler_chooser(scaler_str):
-    """
-    Function outputs a scaler function corresponding to input string
-    """
-    from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
-
-    if scaler_str == "minmax":
-        return MinMaxScaler()
-    elif scaler_str == "standard":
-        return StandardScaler()
-    elif scaler_str == "robust":
-        return RobustScaler()
-    return None
 
 
 def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_state=42):
