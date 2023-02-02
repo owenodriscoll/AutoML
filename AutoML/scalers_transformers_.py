@@ -5,7 +5,7 @@ Created on Fri Jan 27 16:11:20 2023
 
 @author: owen
 """
-from typing import Optional, Any
+# from typing import Optional, Any
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import PolynomialFeatures
@@ -28,11 +28,11 @@ class FuncHelper:
             print("Input argument not of type: int, float or dict")
 
 
-def decorator_report(variable):
+def decorator_report(variable, to_return_self: bool = False):
     def wrap_function(f):
         def wrap_arguments(args):
             if isinstance(getattr(args, variable), type(None)):
-                return None
+                return args if to_return_self else None
             else:
                 return f(args)
 
@@ -42,15 +42,17 @@ def decorator_report(variable):
 
 
 class Chooser:
-    def __init__(self, arg: any, func: callable, transformer: str, trial=None):  # change to args
+    def __init__(self, arg: any, func: callable, transformer: str, trial=None, **kwargs):  # change to args
         self.arg = arg
         self.func = func
         self.transformer = transformer
         self.trial = trial
         self.func_fitted = None
+        self.__dict__.update(kwargs)
 
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func, self.arg)
+        return self.func_fitted
 
     @decorator_report("func_fitted")
     def _report_trial(self):
@@ -65,18 +67,18 @@ class Chooser:
 
 
 class PcaChooser(Chooser):
-    def __init__(self, arg, trial=None):  # change to args
-        super().__init__(arg=arg, func=PCA, transformer='pca_value', trial=trial)  # change to args
+    def __init__(self, arg, trial=None, **kwargs):  # change to args
+        super().__init__(arg=arg, func=PCA, transformer='pca_value', trial=trial, **kwargs)  # change to args
 
 
 class PolyChooser(Chooser):
-    def __init__(self, arg, trial=None):
-        super().__init__(arg=arg, func=PolynomialFeatures, transformer='poly_value', trial=trial)
+    def __init__(self, arg, trial=None, **kwargs):
+        super().__init__(arg=arg, func=PolynomialFeatures, transformer='poly_value', trial=trial, **kwargs)
 
 
 class SplineChooser(Chooser):
-    def __init__(self, arg, trial=None):
-        super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value', trial=trial)
+    def __init__(self, arg, trial=None, **kwargs):
+        super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value', trial=trial, **kwargs)
 
 
 pca = PcaChooser(3)
@@ -89,11 +91,13 @@ spline_2 = SplineChooser(None).fit_report_trial()
 
 
 class ScalerChooser(Chooser):
-    def __init__(self, arg: str = '', transformer: str = 'scaler', trial=None):
+    def __init__(self, func: callable, arg: str = '', transformer: str = 'scaler', trial=None, **kwargs):
+        super().__init__(arg, func, transformer, trial)
         self.arg = arg
         self.transformer = transformer
         self.trial = trial
         self.func = None
+        self.__dict__.update(kwargs)
 
     def suggest_trial(self):
         # self.arg = self.trial.suggest_categorical(self.transformer, [None, "minmax", "standard", "robust"])
@@ -109,30 +113,44 @@ class ScalerChooser(Chooser):
             self.func = RobustScaler
         return self
 
+
 # ScalerChooser().suggest_trial().string_to_func().func()
 
-class TransformerChooser(Chooser):
+class TransformerChooser:
 
-    def __init__(self, trial=None, random_state: int = 42):
-        self.random_state = random_state
+    def __init__(self, n_quantiles: int = None, trial=None, random_state: int = 42, **kwargs):
+        self.n_quantiles = n_quantiles
         self.trial = trial
+        self.random_state = random_state
         self.func = QuantileTransformer
-
-
+        self.func_fitted = None
+        self.__dict__.update(kwargs)
 
     def suggest_trial(self):
-        #transform_type = trial.suggest_categorical("transformers", ['none', 'quantile_trans'])
+        # transform_type = trial.suggest_categorical("transformers", [None, 'quantile_trans'])
         transform_type = 'quantile_trans'
-        if not transform_type == 'none':
+        if not transform_type == None:
             # self.n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
-            self.n_quantiles = 400
-            #self.func = QuantileTransformer(n_quantiles=self.n_quantiles, output_distribution="normal", random_state=self.random_state)
+            self.n_quantiles = None
+            # self.func = QuantileTransformer(n_quantiles=self.n_quantiles, output_distribution="normal", random_state=self.random_state)
         return self
 
+    @decorator_report("n_quantiles", to_return_self=True)
     def fit(self):
-        self.func_fitted = FuncHelper.run_with_argument(self.func.set_params, self.n_quantiles)
-        return self
+        self.func_fitted = FuncHelper.run_with_argument(self.func().set_params, {'n_quantiles': self.n_quantiles,
+                                                                                 'random_state': self.random_state})
+        return self.func_fitted
+    def suggest_and_fit(self):
+        self.suggest_trial()
+        self.fit()
+        return self.func_fitted
 
+
+TransformerChooser(n_quantiles=400).fit()
+TransformerChooser().suggest_trial().fit()
+test_dict = {"n_quantiles": 1000, 'a': 'test'}
+t = TransformerChooser(**test_dict).suggest_and_fit()
+TransformerChooser(**test_dict).fit()
 
 
 def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_state=42):
@@ -151,3 +169,5 @@ def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_sta
             n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
 
         return QuantileTransformer(n_quantiles=n_quantiles, output_distribution="normal", random_state=random_state)
+
+
