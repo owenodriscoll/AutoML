@@ -3,5 +3,5 @@
 
 from .automl import automated_regression
 from ._regressors import regressor_selector
-from ._scaler_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
+from ._scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
 

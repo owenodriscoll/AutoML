@@ -19,8 +19,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from AutoML.AutoML._regressors import regressor_selector
-from AutoML.AutoML._scaler_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
-
+from AutoML.AutoML._scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
 
 def warning_catcher(f):
     def wrap_arguments(args):
@@ -38,128 +37,15 @@ def warning_catcher(f):
 
     return wrap_arguments
 
-def scaler_chooser(scaler_str):
-    """
-    Function outputs a scaler function corresponding to input string
-    """
-    from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
-
-    if scaler_str == "minmax":
-        return MinMaxScaler()
-    elif scaler_str == "standard":
-        return StandardScaler()
-    elif scaler_str == "robust":
-        return RobustScaler()
-    return None
-def pca_chooser(trial=None, **kwargs):
-    """
-    Function outputs a pca function corresponding to input
-    """
-
-    if kwargs.get('pca_value') is not None:
-        from sklearn.decomposition import PCA
-        type_ref = type(kwargs.get('pca_value'))
-
-        if type_ref is dict:
-            pca = PCA(**kwargs.get('pca_value'))
-        elif type_ref is int or type_ref is float or type_ref is str:
-            pca = PCA(kwargs.get('pca_value'))
-        if trial != None:
-            trial.suggest_categorical('pca_value', [pca.get_params()])
-    else:
-        pca = None
-        if trial != None:
-            trial.suggest_categorical('pca_value', [None])
-
-    return pca
-def poly_chooser(trial=None, **kwargs):
-    """
-    Function to transform input variables using polynomial features
-    """
-
-    if kwargs.get('poly_value') is not None:
-        from sklearn.preprocessing import PolynomialFeatures
-        type_ref = type(kwargs.get('poly_value'))
-
-        if type_ref is dict:
-            poly = PolynomialFeatures(**kwargs.get('poly_value'))
-        elif type_ref is int or type_ref is float:
-            poly = PolynomialFeatures(degree=kwargs['poly_value'])
-        if trial != None:
-            trial.suggest_categorical('poly_value', [poly.get_params()])
-    else:
-        poly = None
-        if trial != None:
-            trial.suggest_categorical('poly_value', [None])
-
-    return poly
-def spline_chooser(feature_combo=False, trial=None, **kwargs):
-    """
-    Function to transform input variables using spline features
-    """
-
-    if (kwargs.get('spline_value') is not None):  # & (feature_combo == True):
-        from sklearn.preprocessing import SplineTransformer
-        type_ref = type(kwargs.get('spline_value'))
-
-        if type_ref is dict:
-            spline = SplineTransformer(**kwargs.get('spline_value'))
-        elif type_ref is tuple or type_ref is list:
-            spline = SplineTransformer(*kwargs.get('spline_value'))
-        elif type_ref is int:
-            spline = SplineTransformer(kwargs.get('spline_value'))
-        # elif (trial != None) & (type_ref is bool):
-        #     n_knots = trial.suggest_categorical("spline_n_knots", [int(i) for i in np.linspace(2, 10, 9)])
-        #     degree = trial.suggest_categorical("spline_degree", [int(i) for i in np.linspace(1, 10, 10)])
-        #     knots = trial.suggest_categorical('spline_knots', ['uniform', 'quantile'])
-        #     spline = SplineTransformer(n_knots = n_knots, degree = degree, knots = knots)
-        if (trial != None) & (type_ref is not bool):
-            trial.suggest_categorical('spline_value', [spline.get_params()])
-            # trial.suggest_categorical("spline_n_knots", [spline.get_params()['n_knots']])
-            # trial.suggest_categorical("spline_degree", [spline.get_params()['degree']])
-            # trial.suggest_categorical('spline_knots', [spline.get_params()['knots']])
-    else:
-        spline = None
-        if trial != None:
-            trial.suggest_categorical('spline_value', [None])
-            # trial.suggest_categorical("spline_n_knots", [None])
-            # trial.suggest_categorical("spline_degree", [None])
-            # trial.suggest_categorical('spline_knots', [None])
-
-    # if (kwargs.get('spline_value') is not None) & (feature_combo == True) & (list(set(kwargs.keys()) & set(['spline_n_knots', 'spline_degree', 'spline_knots'])) != []):
-    #     spline = SplineTransformer(n_knots = kwargs.get('spline_n_knots'), degree = kwargs.get('spline_degree'), knots = kwargs.get('spline_knots'))
-
-    return spline
-def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_state=42):
-    """
-    Function outputs a transformer function corresponding to input string
-    """
-
-    from sklearn.preprocessing import QuantileTransformer
-
-    if transformer_str == "none":
-        return None
-    elif transformer_str == "quantile_trans":
-
-        # -- if optuna trial is provided to function determine optimal number of quantiles
-        if trial != None:
-            n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
-
-        return QuantileTransformer(n_quantiles=n_quantiles, output_distribution="normal", random_state=random_state)
-
-
-
-
-
 class AutomatedRegression:
-    def __init__(self, y: pd.DataFrame, X: pd.DataFrame, test_frac: float=0.2, timeout: int = 600, n_trial: int = 100, cross_validation: callable = None,
+    def __init__(self, y: pd.DataFrame, X: pd.DataFrame, test_frac: float = 0.2, timeout: int = 600, n_trial: int = 100, cross_validation: callable = None,
                  sampler: callable = None, pruner: callable = None, poly_value: Union[int, float, dict] = None, spline_value: Union[int, float, dict] = None,
                  pca_value: Union[int, float, dict] = None, metric_optimise: Callable = median_absolute_error,
-                 metric_assess: list[Callable]=[median_absolute_error, r2_score],
-                 optimisation_direction: str='maximize', write_folder: str=os.getcwd() + '/auto_regression/', overwrite: bool = False,
-                 list_regressors_optimise: list[str]=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'],
-                 list_regressors_assess: list[str]=None, fit_frac: list[float]=[0.1, 0.2, 0.3, 0.4, 0.6, 1],
-                 random_state: int=42, warning_verbosity: str='ignore'):
+                 metric_assess: list[Callable] = [median_absolute_error, r2_score],
+                 optimisation_direction: str = 'minimize', write_folder: str = os.getcwd() + '/auto_regression/', overwrite: bool = False,
+                 list_regressors_optimise: list[str] = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'],
+                 list_regressors_assess: list[str] = None, fit_frac: list[float] = [0.1, 0.2, 0.3, 0.4, 0.6, 1],
+                 random_state: int = 42, warning_verbosity: str = 'ignore'):
         """
 
 
@@ -208,7 +94,7 @@ class AutomatedRegression:
         self.test_index = df_X_test.index.values
         return self
 
-    #@warning_catcher
+    @warning_catcher
     def regressor_optimise(self):
         """
         Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
@@ -247,6 +133,7 @@ class AutomatedRegression:
                 joblib.dump(self._study, self._write_file)
             return
 
+
         def _create_objective():
             def _objective(trial):
                 self._trial = trial
@@ -255,36 +142,25 @@ class AutomatedRegression:
                 joblib.dump(self._study, self._write_file)
 
                 # -- Instantiate scaler for independents
-                #scalers = trial.suggest_categorical("scalers", [None, 'minmax', 'standard', 'robust'])
-                scaler = None #scaler_chooser(scalers)
+                scaler = ScalerChooser(trial=trial).suggest_fit() #None
 
                 # -- determine if requested feature combinations improve results
                 # -- only suggest this to trial of kwargs contain at least one of the relevant parameters
-                if any([bool(i) for i in [self.spline_value, self.poly_value]]):
-
-                    # -- suggest either to include feature combination or not
-                    feature_combo = trial.suggest_categorical("feature_combo", [False, True])
-
-                    # -- if trial will try using feature combinations/compression
+                optionals_included = any([bool(i) for i in [self.spline_value, self.poly_value]])
+                feature_combo = trial.suggest_categorical("feature_combo", [False, True])
+                if all([optionals_included, feature_combo]):
+                    # -- if trial will try using spline or polynomial expansion
                     if feature_combo == True:
-
-                        # -- instantiate spline transformer if relevant kwargs included
-                        spline = None
-
-                        # -- instantiate polynomial transformer if relevant kwargs included
-                        poly = None
-                    else:
-                        spline = poly = None
-
-                    # -- instantiate pca compression if relevant kwargs included
+                        spline = SplineChooser(spline_value=self.spline_value, trial=trial).fit_report_trial()
+                        poly = PolyChooser(poly_value=self.poly_value, trial=trial).fit_report_trial()
                 else:
-                    spline = poly = None
+                    spline = SplineChooser(spline_value=None, trial=trial).fit_report_trial()
+                    poly = PolyChooser(poly_value=None, trial=trial).fit_report_trial()
 
-                pca = None
+                pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
                 # -- Instantiate transformer for dependents
-                # transformers = trial.suggest_categorical("transformers", ['none', 'quantile_trans'])
-                transformer = None
+                transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
 
                 # -- Tune estimator algorithm
                 param = self._create_params(trial)
@@ -429,8 +305,47 @@ class AutomatedRegression:
             _optimise()
             return self
 
+    def regressor_fit(self):
 
+        """
 
+        """
+
+        estimators = []
+        parameter_dict_dict = {}
+        for regressor_name in self.list_regressors_optimise:
+            study = joblib.load(self.write_folder + regressor_name + '.pkl')
+            self._study = study
+
+            spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
+            poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
+            pca = PcaChooser(pca_value=study.best_params.get('pca_value')).fit()
+            scaler = ScalerChooser(arg=study.best_params.get('scaler')).string_to_func()
+            transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
+
+            list_params = list(study.best_params)
+            list_params_NOT_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo', 'transformers', 'n_quantiles']
+            list_params_regressor = set(list_params).difference(set(list_params_NOT_regressor))
+
+            parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
+            parameter_dict_dict[regressor_name] = parameter_dict
+
+            # study must contain parameters "scalers", "transformers", "n_quantiles"
+            pipe_single_study = Pipeline([
+                ('poly', poly),
+                ('spline', spline),
+                ('scaler', scaler),
+                ('pca', pca),
+                ('model', TransformedTargetRegressor(
+                    # index 0 is the regressor, index 1 is hyperoptimization function
+                    regressor=self.regressors_2_assess[regressor_name][0](**parameter_dict),
+                    transformer=transformer
+                ))]
+            )
+            estimators.append((regressor_name, pipe_single_study))
+        self.estimators = estimators
+
+        return self
 
 
 # test = AutomatedRegression(y=pd.DataFrame([1,2,3,4]), X=pd.DataFrame([1,2,3,4]))
@@ -441,6 +356,15 @@ class AutomatedRegression:
 from sklearn.datasets import make_regression
 X, y = make_regression(n_samples=2000, n_features=10, n_informative=5)
 
-# test2 = AutomatedRegression(y=pd.DataFrame(y), X=pd.DataFrame(X), pca_value=None, spline_value=None, poly_value=None, n_trial=2, overwrite=True)
-# test2.split_train_test().regressor_optimise()
+test2 = AutomatedRegression(y=pd.DataFrame(y),
+                            X=pd.DataFrame(X),
+                            pca_value=2,
+                            spline_value={'n_knots':4, 'degree':2},
+                            poly_value=None,
+                            n_trial=5,
+                            overwrite=True,
+                            list_regressors_optimise = ['lightgbm', 'lassolars'])
+test2.split_train_test().regressor_optimise()
+# test2.regressor_fit()
 
+TransformerChooser(test2._study.best_params.get('n_quantiles'), test2.random_state).fit()
