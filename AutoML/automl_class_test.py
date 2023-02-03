@@ -18,7 +18,8 @@ from sklearn.pipeline import Pipeline
 
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
-from AutoML.AutoML.regressors_ import regressor_selector
+from AutoML.AutoML._regressors import regressor_selector
+from AutoML.AutoML._scaler_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
 
 
 def warning_catcher(f):
