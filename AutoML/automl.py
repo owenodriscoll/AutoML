@@ -25,7 +25,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 
-from regressors_ import regressor_selector
+from AutoML.AutoML.regressors_ import regressor_selector
 
 #%%
 
@@ -143,8 +143,8 @@ def automated_regression(y, X, test_frac = 0.2, timeout = 600, n_trial = 100,
     ########################################################
     # -- fit regressors using optimised hyperparameters -- #
     ########################################################
-    
-    estimators = regressor_fit(list_regressors_training, methods, write_folder)
+    methods_assess = regressor_selector(regressor_names = list_regressors_training, random_state = random_state)
+    estimators = regressor_fit(list_regressors_training, methods_assess, write_folder)
     
     ########################################################################
     # -- train regressors (including stacked) and calculate performance -- #

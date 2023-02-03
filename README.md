@@ -26,6 +26,7 @@ For a more detailed example checkout `example_automated_ML.ipynb`
 ```python
 import pandas as pd
 import sklearn
+import automl
 from sklearn.datasets import fetch_california_housing
 
 dataset = fetch_california_housing()
@@ -33,7 +34,7 @@ X_full, y_full = dataset.data, dataset.target
 y = pd.DataFrame(y_full)
 X = pd.DataFrame(X_full)
 
-metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test = automated_ML.automated_regression(
+metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test = automl.automated_regression(
             y = y, X = X, test_frac = 0.2, timeout = 600, n_trial = 100, 
             metric_optimise = sklearn.metrics.mean_pinball_loss,  metric_assess = [sklearn.metrics.mean_pinball_loss, sklearn.metrics.mean_squared_error, sklearn.metrics.r2_score],
             optimisation_direction = 'minimize',  overwrite = True, 

@@ -105,10 +105,10 @@ def xgboost_loader(random_state):
         
         if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
             
-            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 16, log = False)  
+            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 14, log = False)  
             
             # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-            if (param_dict['max_depth'] >= 13) :
+            if (param_dict['max_depth'] >= 12) :
                 max_n_estimators = 200; min_eta = 1e-2
             elif (param_dict['max_depth'] >= 10) :
                 max_n_estimators = 300; min_eta = 1e-3 # change to if >= 10, elif >= 8, else 
@@ -139,12 +139,12 @@ def catboost_loader(random_state):
     
     def catboostHParams(trial):
         param_dict = {}
-        param_dict['depth'] = trial.suggest_int("depth", 1, 12, log = False) # maybe increase?
+        param_dict['depth'] = trial.suggest_int("depth", 1, 10, log = False) # maybe increase?
         
         # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-        if (param_dict['depth'] >= 10) :
+        if (param_dict['depth'] >= 8) :
             max_iterations = 300; min_learning_rate = 1e-2
-        elif (param_dict['depth'] >= 8) :
+        elif (param_dict['depth'] >= 6) :
             max_iterations = 400; min_learning_rate = 5e-3
         else :
             max_iterations = 500; min_learning_rate = 1e-3
