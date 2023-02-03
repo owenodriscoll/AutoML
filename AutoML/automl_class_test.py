@@ -190,12 +190,9 @@ class AutomatedRegression:
         self.warning_verbosity = warning_verbosity
         self.create_dir()
 
-    # turn list of regressors into dictionary containing regressor functions
-
     def create_dir(self):
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
-            print('would have made a new directory now')
 
     def split_train_test(self, shuffle: bool = True):
         from sklearn.model_selection import train_test_split
@@ -244,8 +241,8 @@ class AutomatedRegression:
 
                 self._study.optimize(_create_objective(),
                                n_trials=self.n_trial, timeout=self.timeout, catch=catch)
-                #
-                # # -- save final study iteration
+
+                # -- save final study iteration
                 joblib.dump(self._study, self._write_file)
             return
 
@@ -297,22 +294,19 @@ class AutomatedRegression:
 
                 # -- Create transformed regressor
                 transformed_regressor = TransformedTargetRegressor(
-                    regressor= regressor,
+                    regressor=regressor,
                     transformer=transformer
                 )
 
                 # -- Make a pipeline
-                self._pipeline = pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
+                self._pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
                                      ('regressor', transformed_regressor)])
 
-                # -- Assess model performance using specified cross validation on pipeline with pruning
-                result = _model_performance()
-                # result = 0.15
-                return result
+                return _model_performance()
 
             return _objective
 
-        def _model_performance():
+        def _model_performance() -> float:
             """
             function for splitting, training, assessing and pruning the regressor
             1. First the data is split into K-folds.

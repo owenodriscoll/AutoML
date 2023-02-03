@@ -13,6 +13,8 @@ from sklearn.preprocessing import SplineTransformer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.preprocessing import QuantileTransformer
 
+from typing import Callable, Union
+
 
 class FuncHelper:
     @staticmethod
@@ -67,32 +69,22 @@ class Chooser:
 
 
 class PcaChooser(Chooser):
-    def __init__(self, arg, trial=None, **kwargs):  # change to args
-        super().__init__(arg=arg, func=PCA, transformer='pca_value', trial=trial, **kwargs)  # change to args
+    def __init__(self, pca_value: Union[int, float, dict] = None, trial=None):  # change to args
+        super().__init__(arg=pca_value, func=PCA, transformer='pca_value', trial=trial)  # change to args
 
 
 class PolyChooser(Chooser):
-    def __init__(self, arg, trial=None, **kwargs):
-        super().__init__(arg=arg, func=PolynomialFeatures, transformer='poly_value', trial=trial, **kwargs)
+    def __init__(self, poly_value: Union[int, float, dict] = None, trial=None):
+        super().__init__(arg=poly_value, func=PolynomialFeatures, transformer='poly_value', trial=trial)
 
 
 class SplineChooser(Chooser):
-    def __init__(self, arg, trial=None, **kwargs):
-        super().__init__(arg=arg, func=SplineTransformer, transformer='spline_value', trial=trial, **kwargs)
+    def __init__(self, spline_value: Union[int, float, dict], trial=None):
+        super().__init__(arg=spline_value, func=SplineTransformer, transformer='spline_value', trial=trial)
 
 
-pca = PcaChooser(3)
-pca.fit()
-pca._report_trial()
-PcaChooser(3).fit_report_trial()
-test = PcaChooser(3)
-spline = SplineChooser(3).fit_report_trial()
-spline_2 = SplineChooser(None).fit_report_trial()
-
-
-class ScalerChooser(Chooser):
-    def __init__(self, func: callable, arg: str = '', transformer: str = 'scaler', trial=None, **kwargs):
-        super().__init__(arg, func, transformer, trial)
+class ScalerChooser:
+    def __init__(self, func: callable = None, arg: str = '', transformer: str = 'scaler', trial=None, **kwargs):
         self.arg = arg
         self.transformer = transformer
         self.trial = trial
@@ -111,10 +103,12 @@ class ScalerChooser(Chooser):
             self.func = StandardScaler
         elif self.arg == "robust":
             self.func = RobustScaler
-        return self
+        return self.func()
 
+    def suggest_fit(self):
+        self.suggest_trial()
+        return self.string_to_func()
 
-# ScalerChooser().suggest_trial().string_to_func().func()
 
 class TransformerChooser:
 
@@ -140,6 +134,7 @@ class TransformerChooser:
         self.func_fitted = FuncHelper.run_with_argument(self.func().set_params, {'n_quantiles': self.n_quantiles,
                                                                                  'random_state': self.random_state})
         return self.func_fitted
+
     def suggest_and_fit(self):
         self.suggest_trial()
         self.fit()
@@ -151,23 +146,3 @@ TransformerChooser().suggest_trial().fit()
 test_dict = {"n_quantiles": 1000, 'a': 'test'}
 t = TransformerChooser(**test_dict).suggest_and_fit()
 TransformerChooser(**test_dict).fit()
-
-
-def transformer_chooser(transformer_str, trial=None, n_quantiles=500, random_state=42):
-    """
-    Function outputs a transformer function corresponding to input string
-    """
-
-    from sklearn.preprocessing import QuantileTransformer
-
-    if transformer_str == "none":
-        return None
-    elif transformer_str == "quantile_trans":
-
-        # -- if optuna trial is provided to function determine optimal number of quantiles
-        if not trial is None:
-            n_quantiles = trial.suggest_int('n_quantiles', 100, 4000, step=100)
-
-        return QuantileTransformer(n_quantiles=n_quantiles, output_distribution="normal", random_state=random_state)
-
-
