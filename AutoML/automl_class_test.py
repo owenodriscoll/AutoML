@@ -72,7 +72,7 @@ class AutomatedRegression:
         self.random_state = random_state
         self.regressors_2_optimise = regressor_selector(regressor_names=self.list_regressors_optimise,
                                                       random_state=self.random_state)
-        self.regressors_2_assess = regressor_selector(regressor_names=self.list_regressors_optimise,
+        self.regressors_2_assess = regressor_selector(regressor_names=self.list_regressors_assess,
                                                     random_state=self.random_state)
         self.warning_verbosity = warning_verbosity
         self.create_dir()
@@ -86,8 +86,14 @@ class AutomatedRegression:
         df_X_train, df_X_test, df_y_train, df_y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
                                                                         random_state=self.random_state, shuffle=shuffle)
 
-        self.X_train = df_X_train.values
-        self.X_test = df_X_test.values
+        # -- if independent X contains a single column it must be reshaped, else estimate.fit() fails
+        if df_X_train.values.ndim == 1:
+            X_train, X_test = (df_X_train.values.reshape(-1, 1), df_X_test.values.reshape(-1, 1))
+        else:
+            X_train, X_test = (df_X_train.values, df_X_test.values)
+
+        self.X_train = X_train
+        self.X_test = X_test
         self.y_train = np.ravel(df_y_train.values)
         self.y_test = np.ravel(df_y_test.values)
         self.train_index = df_X_train.index.values
@@ -95,7 +101,7 @@ class AutomatedRegression:
         return self
 
     @warning_catcher
-    def regressor_optimise(self):
+    def hyperoptimisation(self):
         """
         Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
         """
@@ -142,21 +148,21 @@ class AutomatedRegression:
                 joblib.dump(self._study, self._write_file)
 
                 # -- Instantiate scaler for independents
-                scaler = ScalerChooser(trial=trial).suggest_fit() #None
+                scaler = ScalerChooser(trial=trial).suggest_fit()
 
                 # -- determine if requested feature combinations improve results
                 # -- only suggest this to trial of kwargs contain at least one of the relevant parameters
                 optionals_included = any([bool(i) for i in [self.spline_value, self.poly_value]])
                 feature_combo = trial.suggest_categorical("feature_combo", [False, True])
+
                 if all([optionals_included, feature_combo]):
-                    # -- if trial will try using spline or polynomial expansion
-                    if feature_combo == True:
-                        spline = SplineChooser(spline_value=self.spline_value, trial=trial).fit_report_trial()
-                        poly = PolyChooser(poly_value=self.poly_value, trial=trial).fit_report_trial()
+                    spline = SplineChooser(spline_value=self.spline_value, trial=trial).fit_report_trial()
+                    poly = PolyChooser(poly_value=self.poly_value, trial=trial).fit_report_trial()
                 else:
                     spline = SplineChooser(spline_value=None, trial=trial).fit_report_trial()
                     poly = PolyChooser(poly_value=None, trial=trial).fit_report_trial()
 
+                # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
                 # -- Instantiate transformer for dependents
@@ -246,7 +252,7 @@ class AutomatedRegression:
                         # -- fit transformers to training fold of training data
                         fold_X_train_frac_transformed = self._pipeline[:-1].fit_transform(fold_X_train_frac)
 
-                        # -- transform testting fold of training data
+                        # -- transform testing fold of training data
                         fold_X_test_frac_transformed = self._pipeline[:-1].transform(fold_X_test_frac)
 
                         # fit pipeline using pre-fitted transformers
@@ -291,10 +297,10 @@ class AutomatedRegression:
                 # -- only prune if not applied on fraction containing all datapoints
                 if partial_fit_frac < 1.0:
 
-                    # -- Report results to decide wether to prune
+                    # -- Report results to decide whether to prune
                     self._trial.report(result_folds_frac, idx_fraction)
 
-                    # -- Prune the intermediate value if neccessary.
+                    # -- Prune the intermediate value if necessary.
                     if self._trial.should_prune():
                         raise optuna.TrialPruned()
 
@@ -305,17 +311,16 @@ class AutomatedRegression:
             _optimise()
             return self
 
-    def regressor_fit(self):
+    def select_best_hyperparameters(self):
 
         """
 
         """
 
         estimators = []
-        parameter_dict_dict = {}
-        for regressor_name in self.list_regressors_optimise:
+        for regressor_name in self.list_regressors_assess:
             study = joblib.load(self.write_folder + regressor_name + '.pkl')
-            self._study = study
+            #self._study = study
 
             spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
             poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
@@ -324,20 +329,18 @@ class AutomatedRegression:
             transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
 
             list_params = list(study.best_params)
-            list_params_NOT_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo', 'transformers', 'n_quantiles']
-            list_params_regressor = set(list_params).difference(set(list_params_NOT_regressor))
+            list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo', 'transformers', 'n_quantiles']
+            list_params_regressor = set(list_params).difference(set(list_params_not_regressor))
 
             parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
-            parameter_dict_dict[regressor_name] = parameter_dict
 
-            # study must contain parameters "scalers", "transformers", "n_quantiles"
             pipe_single_study = Pipeline([
                 ('poly', poly),
                 ('spline', spline),
                 ('scaler', scaler),
                 ('pca', pca),
                 ('model', TransformedTargetRegressor(
-                    # index 0 is the regressor, index 1 is hyperoptimization function
+                    # index 0 is the regressor, index 1 is hyper-optimization function
                     regressor=self.regressors_2_assess[regressor_name][0](**parameter_dict),
                     transformer=transformer
                 ))]
@@ -346,6 +349,96 @@ class AutomatedRegression:
         self.estimators = estimators
 
         return self
+
+    @warning_catcher
+    def assess(self):
+        """
+
+        """
+
+        # -- split data according to cross validation for assessment
+        indexes_test_cv = list(self.cross_validation.split(self.X_test))
+        self.indexes_test_cv = indexes_test_cv
+
+        # -- determine names of regressors to assess
+        regressors_to_assess = self.list_regressors_assess + ['stacked']
+
+        # -- create an empty dictionary to populate with performance while looping over regressors
+        summary = dict([(regressor, list()) for regressor in regressors_to_assess])
+
+        for i, regressor in enumerate(regressors_to_assess):
+            estimator_temp = self.estimators[i:i + 1]
+
+            # -- the final regressor is the stacked regressor
+            if i == len(self.estimators):
+                estimator_temp = self.estimators
+
+                regressor_final = StackingRegressor(estimators=estimator_temp,
+                                                    final_estimator=Ridge(random_state=self.random_state),
+                                                    cv=self.cross_validation)
+
+                regressor_final.fit(self.X_train, self.y_train)
+
+                # -- predict on the whole testing dataset
+                self.y_pred = regressor_final.predict(self.X_test)
+
+                # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite or not
+                write_file_stacked_regressor = self.write_folder + "stacked_regressor.joblib"
+                if os.path.isfile(write_file_stacked_regressor):
+                    if self.overwrite != True:
+                        user_input = input(
+                            "Stacked Regressor already exists in directory but overwrite set to 'False'. Overwrite anyway ? (y/n): ")
+                        if user_input != 'y':
+                            message = "Stacked Regressor already exists in directory but overwrite set to 'False'. Stacked regressor not saved."
+                            print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
+                    if self.overwrite == True:
+                        user_input = input(
+                            "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you certain ? (y/n): ")
+                        if user_input != 'n':
+                            message = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'"
+                            print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
+                            joblib.dump(regressor_final, write_file_stacked_regressor)
+
+                # -- if file doesn't exist, write it
+                if not os.path.isfile(write_file_stacked_regressor):
+                    joblib.dump(regressor_final, write_file_stacked_regressor)
+
+            else:
+                regressor_final = estimator_temp[0][1]
+                regressor_final.fit(self.X_train, self.y_train)
+
+            # -- create dictionary with elements per metric allowing per metric fold performance to be stored
+            metric_performance_dict = dict(
+                [('metric_' + str(i), [metric, list()]) for i, metric in enumerate(self.metric_assess)])
+
+            # -- For each TEST data fold...
+            for idx_fold, fold in enumerate(indexes_test_cv):
+                # -- Select the fold indexes
+                fold_test = fold[1]
+
+                # -- Predict on the TEST data fold
+                prediction = regressor_final.predict(self.X_test[fold_test, :])
+
+                # -- Assess prediction per metric and store per-fold performance in dictionary
+                [metric_performance_dict[key][1].append(metric_performance_dict[key][0](self.y_test[fold_test], prediction))
+                 for key in metric_performance_dict]
+
+            # -- store mean and standard deviation of performance over folds per regressor
+            summary[regressor] = [
+                [np.mean(metric_performance_dict[key][1]), np.std(metric_performance_dict[key][1])] for key in
+                metric_performance_dict]
+
+            self.summary = summary
+
+        return self
+
+    def apply(self):
+        self.split_train_test()
+        self.hyperoptimisation()
+        self.select_best_hyperparameters()
+        self.assess()
+        return self
+
 
 
 # test = AutomatedRegression(y=pd.DataFrame([1,2,3,4]), X=pd.DataFrame([1,2,3,4]))
@@ -363,8 +456,8 @@ test2 = AutomatedRegression(y=pd.DataFrame(y),
                             poly_value=None,
                             n_trial=5,
                             overwrite=True,
-                            list_regressors_optimise = ['lightgbm', 'lassolars'])
-test2.split_train_test().regressor_optimise()
-# test2.regressor_fit()
+                            list_regressors_optimise=['lightgbm', 'lassolars'])
+# test2.split_train_test().hyperoptimisation()
+# test2.select_best_hyperparameters().assess()
 
-TransformerChooser(test2._study.best_params.get('n_quantiles'), test2.random_state).fit()
+# test2.apply()
