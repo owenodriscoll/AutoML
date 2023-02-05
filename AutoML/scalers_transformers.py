@@ -13,38 +13,7 @@ from sklearn.preprocessing import SplineTransformer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.preprocessing import QuantileTransformer
 from typing import Union
-import warnings, sys, os
-
-class FuncHelper:
-    @staticmethod
-    def run_with_argument(f, args):
-
-        if isinstance(args, (int, float)):
-            return f(args)
-        if isinstance(args, list):
-            return f(*args)
-        if isinstance(args, dict):
-            return f(**args)
-        elif isinstance(args, type(None)):
-            return None
-        else:
-            print("Input argument not of type: int, float or dict")
-
-    @staticmethod
-    def function_warning_catcher(f, args, warning_verbosity):
-        warnings.simplefilter(warning_verbosity, UserWarning)
-        old_stdout = sys.stdout
-        if warning_verbosity == 'ignore':
-            sys.stdout = open(os.devnull, "w")
-        else:
-            sys.stdout = old_stdout
-
-        out = FuncHelper.run_with_argument(f, args)
-
-        warnings.simplefilter('default', UserWarning)
-        sys.stdout = old_stdout
-
-        return out
+from AutoML.AutoML.function_helper import FuncHelper
 
 
 def decorator_report(variable, to_return_self: bool = False):
@@ -76,7 +45,6 @@ class Chooser:
     @decorator_report("func_fitted")
     def _report_trial(self):
         self.trial.suggest_categorical(self.transformer, [self.func_fitted.get_params()])
-        #print(self.func_fitted.get_params())
         return self
 
     def fit_report_trial(self) -> callable:
@@ -109,7 +77,6 @@ class ScalerChooser:
 
     def suggest_trial(self):
         self.arg = self.trial.suggest_categorical(self.transformer, [None, "minmax", "standard", "robust"])
-        # self.arg = "minmax"
         return self
 
     def string_to_func(self):
@@ -139,13 +106,10 @@ class TransformerChooser:
 
     def suggest_trial(self):
         transform_type = self.trial.suggest_categorical("transformers", [None, 'quantile_trans'])
-        #transform_type = 'quantile_trans'
         if not transform_type == None:
             self.n_quantiles = self.trial.suggest_int('n_quantiles', 100, 4000, step=100)
-            #self.n_quantiles = None
         return self
 
-    #@decorator_report("n_quantiles", to_return_self=True)
     @decorator_report("n_quantiles")
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func().set_params, {'n_quantiles': self.n_quantiles,

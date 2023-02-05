@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from .automl import AutomatedRegression
-from ._regressors import regressor_selector
-from ._scalers_transformers import FuncHelper, PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
+from .regressors import regressor_selector
+from .function_helper import FuncHelper
+from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
 

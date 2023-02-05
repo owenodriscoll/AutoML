@@ -1,22 +1,26 @@
+from __future__ import annotations
 import warnings
 import optuna
 import joblib
 import os, sys
 import pandas as pd
 import numpy as np
-from typing import Callable, Union
+from typing import Callable, Union, List
 from optuna.samplers import TPESampler
-
 from sklearn.metrics import median_absolute_error, r2_score
 from sklearn.model_selection import KFold
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split
 
-from AutoML.AutoML._regressors import regressor_selector
-from AutoML.AutoML._scalers_transformers import FuncHelper, PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
+from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser
+from AutoML.AutoML.regressors import regressor_selector
+from AutoML.AutoML.function_helper import FuncHelper
+
+
 
 
 # Questions:
@@ -55,14 +59,13 @@ class AutomatedRegression:
                  spline_value: Union[int, float, dict] = None,
                  pca_value: Union[int, float, dict] = None,
                  metric_optimise: Callable = median_absolute_error,
-                 metric_assess: list[Callable] = [median_absolute_error, r2_score],
+                 metric_assess: List[Callable] = None,
                  optimisation_direction: str = 'minimize',
                  write_folder: str = os.getcwd() + '/auto_regression/',
                  overwrite: bool = False,
-                 list_regressors_optimise: list[str] = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge',
-                                                        'lassolars'],
-                 list_regressors_assess: list[str] = None,
-                 fit_frac: list[float] = [0.1, 0.2, 0.3, 0.4, 0.6, 1],
+                 list_regressors_optimise: List[str] = None,
+                 list_regressors_assess: List[str] = None,
+                 fit_frac: List[float] = None,
                  random_state: int = 42,
                  warning_verbosity: str = 'ignore'):
         """
@@ -152,14 +155,15 @@ class AutomatedRegression:
         self.spline_value = spline_value
         self.pca_value = pca_value
         self.metric_optimise = metric_optimise
-        self.metric_assess = metric_assess
+        self.metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess
         self.optimisation_direction = optimisation_direction
         self.write_folder = write_folder
         self.overwrite = overwrite
-        self.list_regressors_optimise = list_regressors_optimise
+        self.list_regressors_optimise = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'] if \
+            list_regressors_optimise is None else list_regressors_optimise
         self.list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
             list_regressors_assess
-        self.fit_frac = fit_frac
+        self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if fit_frac is None else fit_frac
         self.random_state = random_state
         self.regressors_2_optimise = regressor_selector(regressor_names=self.list_regressors_optimise,
                                                         random_state=self.random_state)
@@ -195,7 +199,6 @@ class AutomatedRegression:
 
         The data is split and stored in class attributes.
         """
-        from sklearn.model_selection import train_test_split
         df_X_train, df_X_test, df_y_train, df_y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
                                                                         random_state=self.random_state, shuffle=shuffle)
 
@@ -214,7 +217,7 @@ class AutomatedRegression:
         return self
 
     @warning_catcher
-    def regression_hyperoptimise(self):
+    def regression_hyperoptimise(self) -> AutomatedRegression:
         """
         Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
         """
@@ -231,14 +234,11 @@ class AutomatedRegression:
             for regressor_name, (regressor, create_params) in self.regressors_2_optimise.items():
                 study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
                                             pruner=self.pruner)
-                self._study = study
-                self._create_params = create_params
-                self._regressor = regressor
                 self._regressor_name = regressor_name
-                self._write_file = self.write_folder + regressor_name + '.pkl'
+                write_file = self.write_folder + regressor_name + '.pkl'
 
                 # -- if regressor already trained, throw warning unless overwrite  == True
-                if os.path.isfile(self._write_file):
+                if os.path.isfile(write_file):
                     if not self.overwrite:
                         message = "Regressor already exists in directory but overwrite set to 'False'. Regressor skipped."
                         print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
@@ -247,14 +247,14 @@ class AutomatedRegression:
                         message = "Regressor already exists in directory. Overwrite set to 'TRUE'"
                         print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
 
-                self._study.optimize(_create_objective(),
+                study.optimize(_create_objective(study, create_params, regressor, regressor_name, write_file),
                                      n_trials=self.n_trial, timeout=self.timeout, catch=catch)
 
                 # -- save final study iteration
-                joblib.dump(self._study, self._write_file)
+                joblib.dump(study, write_file)
             return
 
-        def _create_objective():
+        def _create_objective(study, create_params, regressor, regressor_name, write_file):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
             the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
@@ -264,10 +264,8 @@ class AutomatedRegression:
             """
 
             def _objective(trial):
-                self._trial = trial
-
                 # save optuna study
-                joblib.dump(self._study, self._write_file)
+                joblib.dump(study, write_file)
 
                 # -- Instantiate scaler for independents
                 scaler = ScalerChooser(trial=trial).suggest_fit()
@@ -291,27 +289,26 @@ class AutomatedRegression:
                 transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
 
                 # -- Tune estimator algorithm
-                param = self._create_params(trial)
+                param = create_params(trial)
 
                 # -- Create regressor
-                regressor = self._regressor()
-                regressor.set_params(**param)
+                regresser_with_parameters = regressor().set_params(**param)
 
                 # -- Create transformed regressor
                 transformed_regressor = TransformedTargetRegressor(
-                    regressor=regressor,
+                    regressor=regresser_with_parameters,
                     transformer=transformer
                 )
 
                 # -- Make a pipeline
-                self._pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
+                pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
                                            ('regressor', transformed_regressor)])
 
-                return _model_performance()
+                return _model_performance(trial, regressor_name, pipeline)
 
             return _objective
 
-        def _model_performance() -> float:
+        def _model_performance(trial, regressor_name, pipeline) -> float:
             """
             function for splitting, training, assessing and pruning the regressor
             1. First the data is split into K-folds.
@@ -367,27 +364,27 @@ class AutomatedRegression:
 
                     # -- determine if regressor is lightgbm boosted model
                     regressor_is_boosted = bool(
-                        set([self._regressor_name]) & set(['lightgbm']))  # xgboost and catboost ignored, bugs  out
+                        set([regressor_name]) & set(['lightgbm']))  # xgboost and catboost ignored, bugs  out
 
                     # -- fit training data and add early stopping function if X-iterations did not improve data
                     # ... if regressor is boosted ...
                     if regressor_is_boosted:
 
                         # -- fit transformers to training fold of training data
-                        fold_X_train_frac_transformed = self._pipeline[:-1].fit_transform(fold_X_train_frac)
+                        fold_X_train_frac_transformed = pipeline[:-1].fit_transform(fold_X_train_frac)
 
                         # -- transform testing fold of training data
-                        fold_X_test_frac_transformed = self._pipeline[:-1].transform(fold_X_test_frac)
+                        fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
 
                         # fit pipeline using pre-fitted transformers
-                        self._pipeline.fit(fold_X_train_frac_transformed, fold_y_train_frac,
+                        pipeline.fit(fold_X_train_frac_transformed, fold_y_train_frac,
                                            regressor__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
                                            regressor__early_stopping_rounds=20)
 
                     # ... if regressor is NOT boosted ...
                     else:
                         # -- fit training data
-                        self._pipeline.fit(fold_X_train_frac, fold_y_train_frac)
+                        pipeline.fit(fold_X_train_frac, fold_y_train_frac)
 
                     # ... assess fold performance, sometimes performance is so poor a value error is thrown, therefore
                     # insert in 'try' function and return nan's for errors
@@ -395,10 +392,10 @@ class AutomatedRegression:
                         # ... if regressor is boosted ...
                         if regressor_is_boosted:
                             # ... make fold prediction on transformed test fraction of training dataset
-                            prediction = self._pipeline.predict(fold_X_test_frac_transformed)
+                            prediction = pipeline.predict(fold_X_test_frac_transformed)
                         else:
                             # ... make fold prediction on original test fraction of training dataset
-                            prediction = self._pipeline.predict(fold_X_test_frac)
+                            prediction = pipeline.predict(fold_X_test_frac)
 
                             # ... assess prediction with chosen metric
                         result_fold = self.metric_optimise(fold_y_test_frac, prediction)
@@ -423,10 +420,10 @@ class AutomatedRegression:
                 if partial_fit_frac < 1.0:
 
                     # -- Report results to decide whether to prune
-                    self._trial.report(result_folds_frac, idx_fraction)
+                    trial.report(result_folds_frac, idx_fraction)
 
                     # -- Prune the intermediate value if necessary.
-                    if self._trial.should_prune():
+                    if trial.should_prune():
                         raise optuna.TrialPruned()
 
             # -- final results are those obtained for last fraction (e.g. fraction of 1/1)
