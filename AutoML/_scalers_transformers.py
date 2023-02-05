@@ -13,20 +13,38 @@ from sklearn.preprocessing import SplineTransformer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.preprocessing import QuantileTransformer
 from typing import Union
-
+import warnings, sys, os
 
 class FuncHelper:
     @staticmethod
-    def run_with_argument(func, arg):
+    def run_with_argument(f, args):
 
-        if isinstance(arg, (int, float)):
-            return func(arg)
-        if isinstance(arg, dict):
-            return func(**arg)
-        elif isinstance(arg, type(None)):
+        if isinstance(args, (int, float)):
+            return f(args)
+        if isinstance(args, list):
+            return f(*args)
+        if isinstance(args, dict):
+            return f(**args)
+        elif isinstance(args, type(None)):
             return None
         else:
             print("Input argument not of type: int, float or dict")
+
+    @staticmethod
+    def function_warning_catcher(f, args, warning_verbosity):
+        warnings.simplefilter(warning_verbosity, UserWarning)
+        old_stdout = sys.stdout
+        if warning_verbosity == 'ignore':
+            sys.stdout = open(os.devnull, "w")
+        else:
+            sys.stdout = old_stdout
+
+        out = FuncHelper.run_with_argument(f, args)
+
+        warnings.simplefilter('default', UserWarning)
+        sys.stdout = old_stdout
+
+        return out
 
 
 def decorator_report(variable, to_return_self: bool = False):
