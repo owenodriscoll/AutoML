@@ -1,6 +1,3 @@
-
-
-
 import warnings
 import optuna
 import joblib
@@ -18,7 +15,9 @@ from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 
 from AutoML.AutoML._regressors import regressor_selector
-from AutoML.AutoML._scalers_transformers import FuncHelper, PcaChooser, PolyChooser, SplineChooser, ScalerChooser, TransformerChooser
+from AutoML.AutoML._scalers_transformers import FuncHelper, PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
+    TransformerChooser
+
 
 # Questions:
 # 1: how to differentiate between class method and class parameter in name?
@@ -41,6 +40,7 @@ def warning_catcher(f):
 
     return wrap_arguments
 
+
 class AutomatedRegression:
     def __init__(self,
                  y: pd.DataFrame,
@@ -59,13 +59,14 @@ class AutomatedRegression:
                  optimisation_direction: str = 'minimize',
                  write_folder: str = os.getcwd() + '/auto_regression/',
                  overwrite: bool = False,
-                 list_regressors_optimise: list[str] = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'],
+                 list_regressors_optimise: list[str] = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge',
+                                                        'lassolars'],
                  list_regressors_assess: list[str] = None,
                  fit_frac: list[float] = [0.1, 0.2, 0.3, 0.4, 0.6, 1],
                  random_state: int = 42,
                  warning_verbosity: str = 'ignore'):
         """
-        A class for automated regression problem solving, which optimizes hyperparameters and select best performing regressor(s).
+        A class for automated regression, which optimizes hyperparameters and select best performing regressor(s).
 
         Parameters:
         -----------
@@ -114,6 +115,22 @@ class AutomatedRegression:
 
         Methods
         -------
+        regression_hyperoptimise:
+            Performs hyperparameter optimization using the Optuna library. The method contains several
+            nested functions and follows a pipeline for training and evaluating a regressor. The method starts by
+            preparing the study for hyperparameter optimization and loops through each regressor in the list
+            "regressors_2_optimise", optimizes its hyperparameters, and saves the final study iteration as a pickle file.
+
+        regression_select_best:
+            This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
+            attribute and store them in the estimators attribute of the class instance.
+
+        regression_evaluate:
+
+        apply:
+            applies in correct order the 'split_train_test', 'regression_hyperoptimise', 'regression_select_best' and
+            'regression_evaluate' methods.
+
 
 
         Returns
@@ -126,9 +143,11 @@ class AutomatedRegression:
         self.test_frac = test_frac
         self.timeout = timeout
         self.n_trial = n_trial
-        self.cross_validation = cross_validation if 'split' in dir(cross_validation) else KFold(n_splits=5, shuffle=True, random_state=random_state)
+        self.cross_validation = cross_validation if 'split' in dir(cross_validation) else \
+            KFold(n_splits=5, shuffle=True, random_state=random_state)
         self.sampler = sampler if 'optuna.samplers' in type(sampler).__module__ else TPESampler(seed=random_state)
-        self.pruner = pruner if 'optuna.pruners' in type(pruner).__module__ else optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
+        self.pruner = pruner if 'optuna.pruners' in type(pruner).__module__ else \
+            optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
         self.poly_value = poly_value
         self.spline_value = spline_value
         self.pca_value = pca_value
@@ -138,15 +157,23 @@ class AutomatedRegression:
         self.write_folder = write_folder
         self.overwrite = overwrite
         self.list_regressors_optimise = list_regressors_optimise
-        self.list_regressors_assess = list_regressors_optimise if list_regressors_assess == None else list_regressors_assess
+        self.list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
+            list_regressors_assess
         self.fit_frac = fit_frac
         self.random_state = random_state
         self.regressors_2_optimise = regressor_selector(regressor_names=self.list_regressors_optimise,
-                                                      random_state=self.random_state)
+                                                        random_state=self.random_state)
         self.regressors_2_assess = regressor_selector(regressor_names=self.list_regressors_assess,
-                                                    random_state=self.random_state)
+                                                      random_state=self.random_state)
         self.warning_verbosity = warning_verbosity
         self.create_dir()
+
+        self.X_train = None
+        self.X_test = None
+        self.y_train = None
+        self.y_test = None
+        self.train_index = None
+        self.test_index = None
 
     def create_dir(self):
         if not os.path.exists(self.write_folder):
@@ -190,6 +217,7 @@ class AutomatedRegression:
         """
         Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
         """
+
         def _optimise():
 
             # -- if catboost is loaded prepare special catch for common catboost errors
@@ -200,7 +228,8 @@ class AutomatedRegression:
                 catch = ( )
 
             for regressor_name, (regressor, create_params) in self.regressors_2_optimise.items():
-                study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler, pruner=self.pruner)
+                study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
+                                            pruner=self.pruner)
                 self._study = study
                 self._create_params = create_params
                 self._regressor = regressor
@@ -209,23 +238,30 @@ class AutomatedRegression:
 
                 # -- if regressor already trained, throw warning unless overwrite  == True
                 if os.path.isfile(self._write_file):
-                    if self.overwrite != True:
+                    if not self.overwrite:
                         message = "Regressor already exists in directory but overwrite set to 'False'. Regressor skipped."
                         print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
                         continue
-                    if self.overwrite == True:
+                    if self.overwrite:
                         message = "Regressor already exists in directory. Overwrite set to 'TRUE'"
                         print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
 
                 self._study.optimize(_create_objective(),
-                               n_trials=self.n_trial, timeout=self.timeout, catch=catch)
+                                     n_trials=self.n_trial, timeout=self.timeout, catch=catch)
 
                 # -- save final study iteration
                 joblib.dump(self._study, self._write_file)
             return
 
-
         def _create_objective():
+            """
+            Method creates the objective function that is optimized by Optuna. The objective function first saves
+            the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
+            feature combinations improve the results, and if so, fits the SplineChooser and PolyChooser. Next, it
+            instantiates PCA compression and the transformer for the dependent variables. Finally, the method tunes
+            the estimator algorithm and creates the regressor.
+            """
+
             def _objective(trial):
                 self._trial = trial
 
@@ -268,7 +304,7 @@ class AutomatedRegression:
 
                 # -- Make a pipeline
                 self._pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
-                                     ('regressor', transformed_regressor)])
+                                           ('regressor', transformed_regressor)])
 
                 return _model_performance()
 
@@ -280,7 +316,7 @@ class AutomatedRegression:
             1. First the data is split into K-folds.
             2. Iteratively an increasing fraction of the training and tes folds and test fold is taken
             3. The regressor is trained and assessed iteratively
-            4. If performance is for first iterations is poor, regressor is pruned thus preventing training and testing on full dataset
+            4. If performance for first iterations is poor, regressor is pruned
 
             """
             # -- turn train and test arrays into temporary dataframes
@@ -297,9 +333,11 @@ class AutomatedRegression:
             for idx_fraction, partial_fit_frac in enumerate(self.fit_frac):
 
                 # -- when too few samples are available for assessment (less than 20 are used as the test fraction --> prun)
-                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * (1) / self.cross_validation.n_splits))
+                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / self.cross_validation.n_splits))
+
                 if min_samples < 20:
-                    # !!! add error condition/print when partial_fit_Frac = 1 while samples are still too low, print statement will be hidden by warning catch
+                    # !!! add error condition/print when partial_fit_Frac = 1 while samples are still too low, print
+                    # statement will be hidden by warning catch
                     continue
 
                 # -- prepare storage lists
@@ -342,15 +380,16 @@ class AutomatedRegression:
 
                         # fit pipeline using pre-fitted transformers
                         self._pipeline.fit(fold_X_train_frac_transformed, fold_y_train_frac,
-                                     regressor__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                     regressor__early_stopping_rounds=20)
+                                           regressor__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
+                                           regressor__early_stopping_rounds=20)
 
                     # ... if regressor is NOT boosted ...
                     else:
                         # -- fit training data
                         self._pipeline.fit(fold_X_train_frac, fold_y_train_frac)
 
-                    # ... assess fold performance, sometimes performance is so poor a value error is thrown, therefore insert in 'try' function and return nan's for errors
+                    # ... assess fold performance, sometimes performance is so poor a value error is thrown, therefore
+                    # insert in 'try' function and return nan's for errors
                     try:
                         # ... if regressor is boosted ...
                         if regressor_is_boosted:
@@ -376,8 +415,8 @@ class AutomatedRegression:
                 result_folds_std = np.std(result_folds)
 
                 # -- Save results
-                result_folds_fracs.append(result_folds_frac);
-                result_folds_stds.append(result_folds_std);
+                result_folds_fracs.append(result_folds_frac)
+                result_folds_stds.append(result_folds_std)
 
                 # -- only prune if not applied on fraction containing all datapoints
                 if partial_fit_frac < 1.0:
@@ -397,15 +436,24 @@ class AutomatedRegression:
             return self
 
     def regression_select_best(self):
-
         """
+        This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
+        attribute and store them in the estimators attribute of the class instance.
 
+        The method loads the study result for each regressor from the file with name "{regressor_name}.pkl" in
+        write_folder directory. Then it instantiates objects of SplineChooser, PolyChooser, PcaChooser, ScalerChooser
+        and TransformerChooser classes using the best parameters obtained from the study result. Next, it creates a
+        pipeline using the Pipeline class from scikit-learn library. Each pipeline per regressor is added to a list of
+        pipelines, which is then assigned to the estimators attribute of the class instance.
+
+        Returns
+        -------
+        class instance.
         """
 
         estimators = []
         for regressor_name in self.list_regressors_assess:
             study = joblib.load(self.write_folder + regressor_name + '.pkl')
-            #self._study = study
 
             spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
             poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
@@ -414,7 +462,8 @@ class AutomatedRegression:
             transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
 
             list_params = list(study.best_params)
-            list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo', 'transformers', 'n_quantiles']
+            list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
+                                         'transformers', 'n_quantiles']
             list_params_regressor = set(list_params).difference(set(list_params_not_regressor))
 
             parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
@@ -435,10 +484,18 @@ class AutomatedRegression:
 
         return self
 
-    # @warning_catcher
     def regression_evaluate(self):
         """
+        Regression evaluation method of an estimator.
 
+        This method will evaluate the regression performance of the estimators specified in 'list_regressors_assess' by
+        splitting the test data into folds according to the cross-validation specified, training the estimators on the
+        training data and evaluating the predictions on the test data. The performance will be stored in a dictionary
+        per metric per estimator. If the estimator is the stacked regressor, it will be saved to disk.
+
+        Returns
+        -------
+        class instance
         """
 
         # -- split data according to cross validation for assessment
@@ -458,40 +515,33 @@ class AutomatedRegression:
             if i == len(self.estimators):
                 estimator_temp = self.estimators
 
+                # -- fit stacked regressor while catching warnings
                 regressor_final = StackingRegressor(estimators=estimator_temp,
                                                     final_estimator=Ridge(random_state=self.random_state),
                                                     cv=self.cross_validation)
-                # self.regressor_final = regressor_final
-                # regressor_final.fit(self.X_train, self.y_train)
-                self._regressor_final = regressor_final
-                FuncHelper.function_warning_catcher(regressor_final.fit, [self.X_train, self.y_train], self.warning_verbosity)
+                FuncHelper.function_warning_catcher(regressor_final.fit, [self.X_train, self.y_train],
+                                                    self.warning_verbosity)
 
-                # @warning_catcher
-                # def test(_self):
-                #     _self.regressor_final.fit(_self.X_train, _self.y_train)
-                #     return
-                #
-                # test(test2)
-
-                # warning_catcher(regressor_final)(self.X_train, self.y_train)
                 # -- predict on the whole testing dataset
                 self.y_pred = regressor_final.predict(self.X_test)
 
-                # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite or not
+                # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite
                 write_file_stacked_regressor = self.write_folder + "stacked_regressor.joblib"
                 if os.path.isfile(write_file_stacked_regressor):
-                    if self.overwrite != True:
-                        user_input = input(
-                            "Stacked Regressor already exists in directory but overwrite set to 'False'. Overwrite anyway ? (y/n): ")
+                    if not self.overwrite:
+                        question = "Stacked Regressor already exists in directory but overwrite set to 'False'. " \
+                                   "Overwrite anyway ? (y/n): "
+                        user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
                         if user_input != 'y':
-                            message = "Stacked Regressor already exists in directory but overwrite set to 'False'. Stacked regressor not saved."
-                            print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
-                    if self.overwrite == True:
-                        user_input = input(
-                            "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you certain ? (y/n): ")
+                            response = "Stacked regressor not saved"
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_')
+                    if self.overwrite:
+                        question = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you " \
+                                  "certain ? (y/n): "
+                        user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
                         if user_input != 'n':
-                            message = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'"
-                            print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
+                            response = "Stacked Regressor overwritten"
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_')
                             joblib.dump(regressor_final, write_file_stacked_regressor)
 
                 # -- if file doesn't exist, write it
@@ -502,7 +552,6 @@ class AutomatedRegression:
                 regressor_final = estimator_temp[0][1]
                 FuncHelper.function_warning_catcher(regressor_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
-                # regressor_final.fit(self.X_train, self.y_train)
 
             # -- create dictionary with elements per metric allowing per metric fold performance to be stored
             metric_performance_dict = dict(
@@ -517,7 +566,8 @@ class AutomatedRegression:
                 prediction = regressor_final.predict(self.X_test[fold_test, :])
 
                 # -- Assess prediction per metric and store per-fold performance in dictionary
-                [metric_performance_dict[key][1].append(metric_performance_dict[key][0](self.y_test[fold_test], prediction))
+                [metric_performance_dict[key][1].append(
+                    metric_performance_dict[key][0](self.y_test[fold_test], prediction))
                  for key in metric_performance_dict]
 
             # -- store mean and standard deviation of performance over folds per regressor
@@ -537,10 +587,10 @@ class AutomatedRegression:
         return self
 
 
-
 # %%
 
 from sklearn.datasets import make_regression
+
 X, y = make_regression(n_samples=2000, n_features=10, n_informative=5, random_state=42)
 
 test2 = AutomatedRegression(y=pd.DataFrame(y),
@@ -550,11 +600,8 @@ test2 = AutomatedRegression(y=pd.DataFrame(y),
                             poly_value=None,
                             n_trial=30,
                             overwrite=True,
-                            metric_optimise= r2_score,
+                            metric_optimise=r2_score,
+                            optimisation_direction='maximize',
                             list_regressors_optimise=['lightgbm', 'lassolars'])
 
-
-
 # test2.apply()
-
-
