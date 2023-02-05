@@ -178,6 +178,7 @@ class AutomatedRegression:
     def create_dir(self):
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
+        return self
 
     def split_train_test(self, shuffle: bool = True):
         """
@@ -585,23 +586,3 @@ class AutomatedRegression:
         self.regression_select_best()
         self.regression_evaluate()
         return self
-
-
-# %%
-
-from sklearn.datasets import make_regression
-
-X, y = make_regression(n_samples=2000, n_features=10, n_informative=5, random_state=42)
-
-test2 = AutomatedRegression(y=pd.DataFrame(y),
-                            X=pd.DataFrame(X),
-                            pca_value=None,
-                            spline_value=None,
-                            poly_value=None,
-                            n_trial=30,
-                            overwrite=True,
-                            metric_optimise=r2_score,
-                            optimisation_direction='maximize',
-                            list_regressors_optimise=['lightgbm', 'lassolars'])
-
-# test2.apply()
