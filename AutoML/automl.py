@@ -1,8 +1,7 @@
 from __future__ import annotations
-import warnings
 import optuna
 import joblib
-import os, sys
+import os
 import pandas as pd
 import numpy as np
 from typing import Callable, Union, List
@@ -21,22 +20,9 @@ from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
 # add condition to skip training on fraction and pruning for trial 0
-
-def warning_catcher(f):
-    def wrap_arguments(args):
-        warnings.simplefilter(args.warning_verbosity, UserWarning)
-        old_stdout = sys.stdout
-        if args.warning_verbosity == 'ignore':
-            sys.stdout = open(os.devnull, "w")
-        else:
-            sys.stdout = old_stdout
-
-        f(args)
-
-        warnings.simplefilter('default', UserWarning)
-        sys.stdout = old_stdout
-
-    return wrap_arguments
+# include categorical feature support
+# try polynomial features with interactions_only = True, include_bias = False
+# make feature combo only occur if polyval or splineval included
 
 
 class AutomatedRegression:
@@ -128,8 +114,6 @@ class AutomatedRegression:
             applies in correct order the 'split_train_test', 'regression_hyperoptimise', 'regression_select_best' and
             'regression_evaluate' methods.
 
-
-
         Returns
         -------
         None
@@ -216,7 +200,7 @@ class AutomatedRegression:
         return self
 
 
-    @warning_catcher
+    @FuncHelper.method_warning_catcher
     def regression_hyperoptimise(self) -> AutomatedRegression:
         """
         Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
@@ -436,7 +420,7 @@ class AutomatedRegression:
             return self
 
 
-    def regression_select_best(self)  -> AutomatedRegression:
+    def regression_select_best(self) -> AutomatedRegression:
         """
         This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
         attribute and store them in the estimators attribute of the class instance.
@@ -486,7 +470,7 @@ class AutomatedRegression:
         return self
 
 
-    def regression_evaluate(self)  -> AutomatedRegression:
+    def regression_evaluate(self) -> AutomatedRegression:
         """
         Regression evaluation method of an estimator.
 
@@ -531,14 +515,14 @@ class AutomatedRegression:
                 if os.path.isfile(write_file_stacked_regressor):
                     if not self.overwrite:
                         question = "Stacked Regressor already exists in directory but overwrite set to 'False'. " \
-                                   "Overwrite anyway ? (y/n): "
+                                   "Overwrite anyway ? (y/n): \n"
                         user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
                         if user_input != 'y':
                             response = "Stacked regressor not saved"
                             print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_')
                     if self.overwrite:
                         question = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you " \
-                                  "certain ? (y/n): "
+                                  "certain ? (y/n): \n"
                         user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
                         if user_input != 'n':
                             response = "Stacked Regressor overwritten"
@@ -579,6 +563,7 @@ class AutomatedRegression:
             self.summary = summary
 
         return self
+
 
     def apply(self):
         self.split_train_test()

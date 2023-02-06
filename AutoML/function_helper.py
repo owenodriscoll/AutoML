@@ -31,3 +31,20 @@ class FuncHelper:
         sys.stdout = old_stdout
 
         return out
+    
+    @staticmethod
+    def method_warning_catcher(f):
+        def wrap_arguments(args):
+            warnings.simplefilter(args.warning_verbosity, UserWarning)
+            old_stdout = sys.stdout
+            if args.warning_verbosity == 'ignore':
+                sys.stdout = open(os.devnull, "w")
+            else:
+                sys.stdout = old_stdout
+
+            f(args)
+
+            warnings.simplefilter('default', UserWarning)
+            sys.stdout = old_stdout
+
+        return wrap_arguments
