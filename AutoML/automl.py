@@ -20,13 +20,7 @@ from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineCh
 from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
-
-
-
-# Questions:
-# 1: how to differentiate between class method and class parameter in name?
-# 2: how to do relative pathing for all files in "package"
-# 3: store FuncHelper (scalers) in separate file?
+# add condition to skip training on fraction and pruning for trial 0
 
 def warning_catcher(f):
     def wrap_arguments(args):
@@ -178,11 +172,16 @@ class AutomatedRegression:
         self.y_test = None
         self.train_index = None
         self.test_index = None
+        self.estimators = None
+        self.y_pred = None
+        self.summary = None
+
 
     def create_dir(self):
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
         return self
+
 
     def split_train_test(self, shuffle: bool = True):
         """
@@ -216,6 +215,7 @@ class AutomatedRegression:
         self.test_index = df_X_test.index.values
         return self
 
+
     @warning_catcher
     def regression_hyperoptimise(self) -> AutomatedRegression:
         """
@@ -234,7 +234,7 @@ class AutomatedRegression:
             for regressor_name, (regressor, create_params) in self.regressors_2_optimise.items():
                 study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
                                             pruner=self.pruner)
-                self._regressor_name = regressor_name
+
                 write_file = self.write_folder + regressor_name + '.pkl'
 
                 # -- if regressor already trained, throw warning unless overwrite  == True
@@ -253,6 +253,7 @@ class AutomatedRegression:
                 # -- save final study iteration
                 joblib.dump(study, write_file)
             return
+
 
         def _create_objective(study, create_params, regressor, regressor_name, write_file):
             """
@@ -307,6 +308,7 @@ class AutomatedRegression:
                 return _model_performance(trial, regressor_name, pipeline)
 
             return _objective
+
 
         def _model_performance(trial, regressor_name, pipeline) -> float:
             """
@@ -433,7 +435,8 @@ class AutomatedRegression:
             _optimise()
             return self
 
-    def regression_select_best(self):
+
+    def regression_select_best(self)  -> AutomatedRegression:
         """
         This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
         attribute and store them in the estimators attribute of the class instance.
@@ -482,7 +485,8 @@ class AutomatedRegression:
 
         return self
 
-    def regression_evaluate(self):
+
+    def regression_evaluate(self)  -> AutomatedRegression:
         """
         Regression evaluation method of an estimator.
 
@@ -498,7 +502,6 @@ class AutomatedRegression:
 
         # -- split data according to cross validation for assessment
         indexes_test_cv = list(self.cross_validation.split(self.X_test))
-        self.indexes_test_cv = indexes_test_cv
 
         # -- determine names of regressors to assess
         regressors_to_assess = self.list_regressors_assess + ['stacked']
