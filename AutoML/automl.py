@@ -70,11 +70,11 @@ class AutomatedRegression:
         pruner: callable, optional (default=HyperbandPruner with min_resource=1, max_resource='auto', reduction_factor=3)
             The pruner object to use for optimization of hyperparameters.
         poly_value: int, float, dict, optional (default=None)
-            The polynomial transformation to apply to the data, if any.
+            The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
         spline_value: int, float, dict, optional (default=None)
-            The spline transformation to apply to the data, if any.
-        pca_value: int, float, dict, optional (default=None)
-            The PCA transformation to apply to the data, if any.
+            The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or or 5
+        pca_value: int, float, dict, optional (default=None). 
+            The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
         metric_optimise: callable, optional (default=median_absolute_error)
             The metric to use for optimization of hyperparameters.
         metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
@@ -86,7 +86,8 @@ class AutomatedRegression:
         overwrite: bool, optional (default=False)
             Whether to overwrite the existing files in the write_folder.
         list_regressors_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
-            The list of names of regressors to optimize.
+            The list of names of regressors to optimize, options: 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 
+            'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_assess: list of str, optional (default=None)
             The list of names of regressors to assess. If None, uses the same as `list_regressors_optimise`.
         fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
