@@ -19,7 +19,6 @@ from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineCh
 from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
-# add condition to skip training on fraction and pruning for trial 0
 # include categorical feature support
 # try polynomial features with interactions_only = True, include_bias = False
 # make feature combo only occur if polyval or splineval included
@@ -161,12 +160,10 @@ class AutomatedRegression:
         self.y_pred = None
         self.summary = None
 
-
     def create_dir(self):
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
         return self
-
 
     def split_train_test(self, shuffle: bool = True):
         """
@@ -200,14 +197,29 @@ class AutomatedRegression:
         self.test_index = df_X_test.index.values
         return self
 
-
     @FuncHelper.method_warning_catcher
     def regression_hyperoptimise(self) -> AutomatedRegression:
         """
-        Function performs the optuna optimisation for filtered list of methods (methods_filt) on training data
+        Performs hyperparameter optimization on the regression models specified in `self.regressors_2_optimise` using Optuna.
+        The optimization is performed on the training data and the final study is saved to disk.
+        
+        Returns:
+            AutomatedRegression: The instance of the class with the updated study information.
+            
+        Raises:
+            CatBoostError: If `catboost` is one of the regressors in `self.regressors_2_optimise`, the optimization process
+            may raise this error if there is an issue with the `catboost` library.
         """
 
         def _optimise():
+            """
+            Optimizes the regressors specified in the `self.regressors_2_optimise` dictionary using Optuna.
+            The study direction, sampler, and pruner are specified in the `self.optimisation_direction`, `self.sampler`, 
+            and `self.pruner` attributes respectively. 
+            
+            The method uses the `_create_objective` function to create the objective function that is optimized by Optuna.
+            The final study iteration is saved using joblib.
+            """
 
             # -- if catboost is loaded prepare special catch for common catboost errors
             if 'catboost' in list(self.regressors_2_optimise.keys()):
@@ -239,7 +251,6 @@ class AutomatedRegression:
                 joblib.dump(study, write_file)
             return
 
-
         def _create_objective(study, create_params, regressor, regressor_name, write_file):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
@@ -259,14 +270,18 @@ class AutomatedRegression:
                 # -- determine if requested feature combinations improve results
                 # -- only suggest this to trial of kwargs contain at least one of the relevant parameters
                 optionals_included = any([bool(i) for i in [self.spline_value, self.poly_value]])
-                feature_combo = trial.suggest_categorical("feature_combo", [False, True])
 
-                if all([optionals_included, feature_combo]):
-                    spline = SplineChooser(spline_value=self.spline_value, trial=trial).fit_report_trial()
-                    poly = PolyChooser(poly_value=self.poly_value, trial=trial).fit_report_trial()
-                else:
-                    spline = SplineChooser(spline_value=None, trial=trial).fit_report_trial()
-                    poly = PolyChooser(poly_value=None, trial=trial).fit_report_trial()
+                spline_input = None
+                poly_input = None
+                
+                if optionals_included:
+                    feature_combo = trial.suggest_categorical("feature_combo", [False, True])
+                    if feature_combo:
+                        spline_input = self.spline_value
+                        poly_input = self.poly_value
+
+                spline = SplineChooser(spline_value=spline_input, trial=trial).fit_report_trial()
+                poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
@@ -294,15 +309,11 @@ class AutomatedRegression:
 
             return _objective
 
-
         def _model_performance(trial, regressor_name, pipeline) -> float:
             """
-            function for splitting, training, assessing and pruning the regressor
-            1. First the data is split into K-folds.
-            2. Iteratively an increasing fraction of the training and tes folds and test fold is taken
-            3. The regressor is trained and assessed iteratively
-            4. If performance for first iterations is poor, regressor is pruned
-
+            Evaluates the performance of the `pipeline` regressor. The performance is evaluated by splitting the data into 
+            K-folds and iteratively training and assessing the regressor using an increasing fraction of the training and 
+            test folds. If the performance for the first iterations is poor, the regressor is pruned.
             """
             
             # -- turn train and test arrays into temporary dataframes
@@ -424,7 +435,6 @@ class AutomatedRegression:
             _optimise()
             return self
 
-
     def regression_select_best(self) -> AutomatedRegression:
         """
         This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
@@ -473,7 +483,6 @@ class AutomatedRegression:
         self.estimators = estimators
 
         return self
-
 
     def regression_evaluate(self) -> AutomatedRegression:
         """
@@ -568,7 +577,6 @@ class AutomatedRegression:
             self.summary = summary
 
         return self
-
 
     def apply(self):
         self.split_train_test()
