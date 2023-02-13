@@ -35,9 +35,9 @@ class AutomatedRegression:
                  cross_validation: callable = None,
                  sampler: callable = None,
                  pruner: callable = None,
-                 poly_value: Union[int, float, dict] = None,
-                 spline_value: Union[int, float, dict] = None,
-                 pca_value: Union[int, float, dict] = None,
+                 poly_value: Union[int, float, dict, type(None)] = None,
+                 spline_value: Union[int, float, dict, type(None)] = None,
+                 pca_value: Union[int, float, dict, type(None)] = None,
                  metric_optimise: Callable = median_absolute_error,
                  metric_assess: List[Callable] = None,
                  optimisation_direction: str = 'minimize',
@@ -46,7 +46,7 @@ class AutomatedRegression:
                  list_regressors_optimise: List[str] = None,
                  list_regressors_assess: List[str] = None,
                  fit_frac: List[float] = None,
-                 random_state: int = 42,
+                 random_state: Union[int, type(None)] = 42,
                  warning_verbosity: str = 'ignore'):
         """
         A class for automated regression, which optimizes hyperparameters and select best performing regressor(s).
@@ -304,25 +304,27 @@ class AutomatedRegression:
             4. If performance for first iterations is poor, regressor is pruned
 
             """
+            
             # -- turn train and test arrays into temporary dataframes
             df_X_train = pd.DataFrame(self.X_train)
             df_y_train = pd.DataFrame(self.y_train)
 
-            # -- Retrieve list containing with dataframes for training and testing for each fold
+            # -- retrieve list containing with dataframes for training and testing for each fold
             indexes_train_kfold = list(self.cross_validation.split(df_X_train))
 
+            # -- the first trial does not require pruning, go straight to last fit fraction
+            fractions = [self.fit_frac[-1]] if trial.number == 0 else self.fit_frac
+
+            # -- prepare storage
             result_folds_fracs = []
             result_folds_stds = []
+            
+            # -- for each fraction value...
+            for idx_fraction, partial_fit_frac in enumerate(fractions):
 
-            # -- For each fraction value...
-            for idx_fraction, partial_fit_frac in enumerate(self.fit_frac):
-
-                # -- when too few samples are available for assessment (less than 20 are used as the test fraction --> prun)
+                # -- when too few samples are available for assessment proceed to next fraction
                 min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / self.cross_validation.n_splits))
-
                 if min_samples < 20:
-                    # !!! add error condition/print when partial_fit_Frac = 1 while samples are still too low, print
-                    # statement will be hidden by warning catch
                     continue
 
                 # -- prepare storage lists
@@ -402,7 +404,7 @@ class AutomatedRegression:
                 # -- Save results
                 result_folds_fracs.append(result_folds_frac)
                 result_folds_stds.append(result_folds_std)
-
+                
                 # -- only prune if not applied on fraction containing all datapoints
                 if partial_fit_frac < 1.0:
 
@@ -413,8 +415,10 @@ class AutomatedRegression:
                     if trial.should_prune():
                         raise optuna.TrialPruned()
 
-            # -- final results are those obtained for last fraction (e.g. fraction of 1/1)
-            return result_folds_fracs[-1]
+            # -- final performance are those obtained for last fraction (e.g. fraction of 1/1)
+            performance = result_folds_fracs[-1]
+            
+            return performance
 
         if bool(self.regressors_2_optimise):
             _optimise()
