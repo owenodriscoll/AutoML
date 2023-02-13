@@ -21,7 +21,6 @@ from AutoML.AutoML.function_helper import FuncHelper
 
 # include categorical feature support
 # try polynomial features with interactions_only = True, include_bias = False
-# make feature combo only occur if polyval or splineval included
 
 
 class AutomatedRegression:
@@ -497,6 +496,9 @@ class AutomatedRegression:
         -------
         class instance
         """
+        
+        # -- check whether split_train_test method has been performed, else perform it
+        if getattr(self, 'X_train') is None: self.split_train_test()
 
         # -- split data according to cross validation for assessment
         indexes_test_cv = list(self.cross_validation.split(self.X_test))
@@ -529,18 +531,18 @@ class AutomatedRegression:
                 if os.path.isfile(write_file_stacked_regressor):
                     if not self.overwrite:
                         question = "Stacked Regressor already exists in directory but overwrite set to 'False'. " \
-                                   "Overwrite anyway ? (y/n): \n"
-                        user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
+                                   "Overwrite anyway ? (y/n):"
+                        user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
                         if user_input != 'y':
                             response = "Stacked regressor not saved"
-                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_')
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
                     if self.overwrite:
                         question = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you " \
-                                  "certain ? (y/n): \n"
-                        user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_')
+                                  "certain ? (y/n):"
+                        user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
                         if user_input != 'n':
                             response = "Stacked Regressor overwritten"
-                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_')
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
                             joblib.dump(regressor_final, write_file_stacked_regressor)
 
                 # -- if file doesn't exist, write it
