@@ -23,7 +23,7 @@ from AutoML.AutoML.function_helper import FuncHelper
 # try polynomial features with interactions_only = True, include_bias = False
 
 
-class AutomatedRegression:
+class AutomatedML:
     def __init__(self,
                  y: pd.DataFrame,
                  X: pd.DataFrame,
@@ -41,8 +41,8 @@ class AutomatedRegression:
                  optimisation_direction: str = 'minimize',
                  write_folder: str = os.getcwd() + '/auto_regression/',
                  overwrite: bool = False,
-                 list_regressors_optimise: List[str] = None,
-                 list_regressors_assess: List[str] = None,
+                 list_optimise: List[str] = None,
+                 list_assess: List[str] = None,
                  fit_frac: List[float] = None,
                  random_state: Union[int, type(None)] = 42,
                  warning_verbosity: str = 'ignore'):
@@ -83,11 +83,11 @@ class AutomatedRegression:
             The folder where to write the results and models.
         overwrite: bool, optional (default=False)
             Whether to overwrite the existing files in the write_folder.
-        list_regressors_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
+        list_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
             The list of names of regressors to optimize, options: 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 
             'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_assess: list of str, optional (default=None)
-            The list of names of regressors to assess. If None, uses the same as `list_regressors_optimise`.
+            The list of names of regressors to assess. If None, uses the same as `list_optimise`.
         fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
             The list of fractions of the data to use for fitting the models.
         random_state: int
@@ -136,16 +136,14 @@ class AutomatedRegression:
         self.optimisation_direction = optimisation_direction
         self.write_folder = write_folder
         self.overwrite = overwrite
-        self.list_regressors_optimise = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'] if \
-            list_regressors_optimise is None else list_regressors_optimise
-        self.list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
-            list_regressors_assess
+        self.list_optimise = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'] if \
+            list_optimise is None else list_optimise
+        self.list_assess = list_optimise if list_assess is None else \
+            list_assess
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if fit_frac is None else fit_frac
         self.random_state = random_state
-        self.regressors_2_optimise = regressor_selector(regressor_names=self.list_regressors_optimise,
-                                                        random_state=self.random_state)
-        self.regressors_2_assess = regressor_selector(regressor_names=self.list_regressors_assess,
-                                                      random_state=self.random_state)
+        self.methods_2_optimise = None
+        self.methods_2_assess = None
         self.warning_verbosity = warning_verbosity
         self.create_dir()
 
@@ -586,3 +584,15 @@ class AutomatedRegression:
         self.regression_select_best()
         self.regression_evaluate()
         return self
+    
+    
+    
+class AutomatedRegression(AutomatedML):
+    def __init__(self, y, X):
+        super()
+        self.regressors_2_optimise = regressor_selector(regressor_names=self.list_regressors_optimise,
+                                                        random_state=self.random_state)
+        self.regressors_2_assess = regressor_selector(regressor_names=self.list_regressors_assess,
+                                                      random_state=self.random_state)
+        
+        self.methods_2_optimise
