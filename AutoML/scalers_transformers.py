@@ -12,6 +12,10 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.preprocessing import SplineTransformer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.preprocessing import QuantileTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.compose import ColumnTransformer
+
 from typing import Union
 from AutoML.AutoML.function_helper import FuncHelper
 
@@ -96,7 +100,6 @@ class ScalerChooser:
 
 
 class TransformerChooser:
-
     def __init__(self, n_quantiles: int = None, trial=None, random_state: int = 42):
         self.n_quantiles = n_quantiles
         self.trial = trial
@@ -121,3 +124,41 @@ class TransformerChooser:
         self.fit()
         return self.func_fitted
 
+
+class CategoricalChooser:
+    def __init__(self, ordinal_columns, categorical_columns):
+        self.ordinal_columns = ordinal_columns
+        self.categorical_columns = categorical_columns
+
+
+    def fit(self):
+        one_hot_encoder = OneHotEncoder(handle_unknown="ignore", sparse=False)
+        ordinal_encoder = OrdinalEncoder()
+        
+        if type(self.ordinal_columns) == type(self.categorical_columns) == list:
+            transformers = [
+                ("ordinal", ordinal_encoder, self.ordinal_columns),
+                ("nominal", one_hot_encoder, self.categorical_columns),
+            ]
+        elif  type(self.ordinal_columns) != type(self.categorical_columns) == list:
+            transformers = [
+                ("nominal", one_hot_encoder, self.categorical_columns),
+            ]
+        elif  type(self.categorical_columns) != type(self.ordinal_columns) == list:
+            transformers = [
+               ("ordinal", ordinal_encoder, self.ordinal_columns),
+            ]
+        else:
+            self.func_fitted = None
+            return self.func_fitted
+        
+        self.func_fitted = ColumnTransformer(
+                transformers=transformers,
+                remainder="passthrough", verbose_feature_names_out=False,
+            )
+        
+        return self.func_fitted
+        
+        
+        
+        
