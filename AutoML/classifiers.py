@@ -14,7 +14,7 @@ Created on Wed Jan 25 14:20:26 2023
 @author: owen
 """
 
-def classifier_selector(classifier_names, random_state = None):
+def classifier_selector(classifier_names, n_classes , random_state = None, ):
     """
     Function to load regressors only when selected by the user. 
     This prevents the entire function from becoming unuseable when one or multiple of the regressors or not installed
@@ -24,6 +24,7 @@ def classifier_selector(classifier_names, random_state = None):
     regressor_names : list of str, regressor names with the following options:
         'dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 
         'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet'
+    n_classes
     random_state : int, reproduceability state for regressors with randomization options
     
     Returns
@@ -43,7 +44,7 @@ def classifier_selector(classifier_names, random_state = None):
     # -- only load the regressor and import relevant package if provided regressor is in the list of pre-defined regressors
     method_dict = {}
     method_dict['dummy'] = dummy_loader() if 'dummy' in selected_methods else None
-    method_dict['lightgbm'] = lightgbm_loader(random_state = random_state) if 'lightgbm' in selected_methods else None
+    method_dict['lightgbm'] = lightgbm_loader(n_classes = n_classes, random_state = random_state) if 'lightgbm' in selected_methods else None
     # method_dict['xgboost'] = xgboost_loader(random_state = random_state) if 'xgboost' in selected_methods else None
     # method_dict['catboost'] = catboost_loader(random_state = random_state) if 'catboost' in selected_methods else None
     # method_dict['bayesianridge'] = bayesianridge_loader() if 'bayesianridge' in selected_methods else None
@@ -75,13 +76,17 @@ def dummy_loader():
     
     return (DummyClassifier, dummyHParams)
 
-def lightgbm_loader(random_state):
+def lightgbm_loader(random_state, n_classes):
     
     from lightgbm import LGBMClassifier
     
     def lightgbmHParams(trial):
         param_dict = {}
-        param_dict['objective'] = trial.suggest_categorical("objective", ['multiclass'])
+        if n_classes > 1:
+            param_dict['objective'] = trial.suggest_categorical("objective", ['multiclass'])
+        elif n_classes == 1:
+            param_dict['objective'] = trial.suggest_categorical("objective", ['binary'])
+        param_dict['num_classes'] = trial.suggest_categorical("num_classes", [n_classes])
         param_dict['max_depth'] = trial.suggest_int('max_depth', 3, 20)
         param_dict['n_estimators'] = trial.suggest_int('n_estimators', 50, 2000, log = True)
         param_dict['min_split_gain'] = trial.suggest_float("min_split_gain", 0, 15)  # boosts speed, decreases performance though
@@ -95,6 +100,8 @@ def lightgbm_loader(random_state):
         return param_dict
     
     return (LGBMClassifier, lightgbmHParams)
+
+
 
 # def xgboost_loader(random_state):
     
