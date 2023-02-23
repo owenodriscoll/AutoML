@@ -6,17 +6,18 @@ import pandas as pd
 import numpy as np
 from typing import Callable, Union, List
 from optuna.samplers import TPESampler
-from sklearn.metrics import median_absolute_error, r2_score
+from sklearn.metrics import median_absolute_error, r2_score, accuracy_score, precision_score
 from sklearn.model_selection import KFold
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import Pipeline
-from sklearn.ensemble import StackingRegressor
-from sklearn.linear_model import Ridge
+from sklearn.ensemble import StackingRegressor, StackingClassifier
+from sklearn.linear_model import Ridge, RidgeClassifier
 from sklearn.model_selection import train_test_split
 
 from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser
 from AutoML.AutoML.regressors import regressor_selector
+from AutoML.AutoML.classifiers import classifier_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
 # include categorical feature support
@@ -33,12 +34,13 @@ class AutomatedML:
                  cross_validation: callable = None,
                  sampler: callable = None,
                  pruner: callable = None,
-                 ml_objective: str = None,
                  poly_value: Union[int, float, dict, type(None)] = None,
                  spline_value: Union[int, float, dict, type(None)] = None,
                  pca_value: Union[int, float, dict, type(None)] = None,
                  metric_optimise: Callable = None,
                  metric_assess: List[Callable] = None,
+                 list_model_optimise: List[str] = None,
+                 list_model_assess: List[str] = None,
                  model_optimise: List[Callable] = None,
                  model_assess: List[Callable] = None,
                  optimisation_direction: str = 'minimize',
@@ -46,7 +48,8 @@ class AutomatedML:
                  overwrite: bool = False,
                  fit_frac: List[float] = None,
                  random_state: Union[int, type(None)] = 42,
-                 warning_verbosity: str = 'ignore'):
+                 warning_verbosity: str = 'ignore',
+                 ml_objective: str = None):
         """
         A class for automated regression, which optimizes hyperparameters and select best performing regressor(s).
 
@@ -137,13 +140,13 @@ class AutomatedML:
         self.overwrite = overwrite
         self.metric_optimise = metric_optimise
         self.metric_assess = metric_assess
+        self.list_model_optimise = list_model_optimise
+        self.list_model_assess = list_model_assess
         self.model_optimise = model_optimise
         self.model_assess = model_assess
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if fit_frac is None else fit_frac
         self.ml_objective = ml_objective
         self.random_state = random_state
-        self.methods_2_optimise = None
-        self.methods_2_assess = None
         self.warning_verbosity = warning_verbosity
         self.create_dir()
 
@@ -198,20 +201,20 @@ class AutomatedML:
     @FuncHelper.method_warning_catcher
     def model_hyperoptimise(self) -> AutomatedML:
         """
-        Performs hyperparameter optimization on the regression models specified in `self.model_2_optimise` using Optuna.
+        Performs hyperparameter optimization on the regression models specified in `self.list_model_optimise` using Optuna.
         The optimization is performed on the training data and the final study is saved to disk.
         
         Returns:
             AutomatedRegression: The instance of the class with the updated study information.
             
         Raises:
-            CatBoostError: If `catboost` is one of the regressors in `self.model_2_optimise`, the optimization process
+            CatBoostError: If `catboost` is one of the regressors in `self.list_model_optimise`, the optimization process
             may raise this error if there is an issue with the `catboost` library.
         """
 
         def _optimise():
             """
-            Optimizes the regressors specified in the `self.model_2_optimise` dictionary using Optuna.
+            Optimizes the regressors specified in the `self.list_model_optimise` dictionary using Optuna.
             The study direction, sampler, and pruner are specified in the `self.optimisation_direction`, `self.sampler`, 
             and `self.pruner` attributes respectively. 
             
@@ -220,13 +223,13 @@ class AutomatedML:
             """
 
             # -- if catboost is loaded prepare special catch for common catboost errors
-            if 'catboost' in list(self.model_2_optimise.keys()):
+            if 'catboost' in list(self.model_optimise.keys()):
                 import catboost
                 catch = (catboost.CatBoostError,)
             else:
                 catch = ( )
 
-            for model_name, (model, create_params) in self.model_2_optimise.items():
+            for model_name, (model, create_params) in self.model_optimise.items():
                 study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
                                             pruner=self.pruner)
 
@@ -284,8 +287,6 @@ class AutomatedML:
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
-                # -- Instantiate transformer for dependents
-                transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
 
                 # -- Tune estimator algorithm
                 param = create_params(trial)
@@ -294,18 +295,21 @@ class AutomatedML:
                 model_with_parameters = model().set_params(**param)
 
                 # -- Create transformed regressor
-                if self.ml_opjective == 'regression':
+                if self.ml_objective == 'regression':
+                    # -- Instantiate transformer for dependents
+                    transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
+                    
                     model_final = TransformedTargetRegressor(
                         regressor=model_with_parameters,
                         transformer=transformer
                     )
-                elif self.ml_opjective == 'classification':
+                elif self.ml_objective == 'classification':
                     model_final = model_with_parameters
 
                 # -- Make a pipeline
                 pipeline = Pipeline([('poly', poly), ('spline', spline), ('scaler', scaler), ('pca', pca),
                                            ('model', model_final)])
-
+                self.pipeline = pipeline
                 return _model_performance(trial, model_name, pipeline)
 
             return _objective
@@ -365,7 +369,7 @@ class AutomatedML:
 
                     # -- determine if regressor is lightgbm boosted model
                     model_is_boosted = bool(
-                        set([model_name]) & set(['lightgbm']))  # xgboost and catboost ignored, bugs  out
+                        set([model_name]) & set(['lightgbm_']))  # xgboost and catboost ignored, bugs  out
 
                     # -- fit training data and add early stopping function if X-iterations did not improve data
                     # ... if regressor is boosted ...
@@ -379,13 +383,14 @@ class AutomatedML:
 
                         # fit pipeline using pre-fitted transformers
                         pipeline.fit(fold_X_train_frac_transformed, fold_y_train_frac,
-                                           regressor__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                           regressor__early_stopping_rounds=20)
+                                           model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
+                                           model__early_stopping_rounds=20)
 
                     # ... if regressor is NOT boosted ...
                     else:
                         # -- fit training data
                         pipeline.fit(fold_X_train_frac, fold_y_train_frac)
+                        self.pipeline = pipeline
 
                     # ... assess fold performance, sometimes performance is so poor a value error is thrown, therefore
                     # insert in 'try' function and return nan's for errors
@@ -432,167 +437,184 @@ class AutomatedML:
             
             return performance
 
-        if bool(self.model_2_optimise):
+        if bool(self.model_optimise):
             _optimise()
             return self
 
-    # def model_select_best(self) -> AutomatedML:
-    #     """
-    #     This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
-    #     attribute and store them in the estimators attribute of the class instance.
+    def model_select_best(self) -> AutomatedML:
+        """
+        This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
+        attribute and store them in the estimators attribute of the class instance.
 
-    #     The method loads the study result for each regressor from the file with name "{regressor_name}.pkl" in
-    #     write_folder directory. Then it instantiates objects of SplineChooser, PolyChooser, PcaChooser, ScalerChooser
-    #     and TransformerChooser classes using the best parameters obtained from the study result. Next, it creates a
-    #     pipeline using the Pipeline class from scikit-learn library. Each pipeline per regressor is added to a list of
-    #     pipelines, which is then assigned to the estimators attribute of the class instance.
+        The method loads the study result for each regressor from the file with name "{regressor_name}.pkl" in
+        write_folder directory. Then it instantiates objects of SplineChooser, PolyChooser, PcaChooser, ScalerChooser
+        and TransformerChooser classes using the best parameters obtained from the study result. Next, it creates a
+        pipeline using the Pipeline class from scikit-learn library. Each pipeline per regressor is added to a list of
+        pipelines, which is then assigned to the estimators attribute of the class instance.
 
-    #     Returns
-    #     -------
-    #     class instance.
-    #     """
+        Returns
+        -------
+        class instance.
+        """
 
-    #     estimators = []
-    #     for model_name in self.list_model_assess:
-    #         study = joblib.load(self.write_folder + model_name + '.pkl')
+        estimators = []
+        for model_name in self.list_model_assess:
+            study = joblib.load(self.write_folder + model_name + '.pkl')
 
-    #         spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
-    #         poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
-    #         pca = PcaChooser(pca_value=study.best_params.get('pca_value')).fit()
-    #         scaler = ScalerChooser(arg=study.best_params.get('scaler')).string_to_func()
-    #         transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
+            spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
+            poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
+            pca = PcaChooser(pca_value=study.best_params.get('pca_value')).fit()
+            scaler = ScalerChooser(arg=study.best_params.get('scaler')).string_to_func()
 
-    #         list_params = list(study.best_params)
-    #         list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
-    #                                      'transformers', 'n_quantiles']
-    #         list_params_regressor = set(list_params).difference(set(list_params_not_regressor))
+            list_params = list(study.best_params)
+            list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
+                                          'transformers', 'n_quantiles']
+            list_params_model = set(list_params).difference(set(list_params_not_model))
 
-    #         parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
+            parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_model)}
 
-    #         pipe_single_study = Pipeline([
-    #             ('poly', poly),
-    #             ('spline', spline),
-    #             ('scaler', scaler),
-    #             ('pca', pca),
-    #             ('model', TransformedTargetRegressor(
-    #                 # index 0 is the regressor, index 1 is hyper-optimization function
-    #                 regressor=self.regressors_2_assess[regressor_name][0](**parameter_dict),
-    #                 transformer=transformer
-    #             ))]
-    #         )
-    #         estimators.append((regressor_name, pipe_single_study))
-    #     self.estimators = estimators
+            model_with_parameters = self.model_assess[model_name][0](**parameter_dict)
 
-    #     return self
+            # -- Create transformed regressor
+            if self.ml_objective == 'regression':
+                transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
+                
+                model_final = TransformedTargetRegressor(
+                    regressor=model_with_parameters,
+                    transformer=transformer
+                )
+            elif self.ml_objective == 'classification':
+                model_final = model_with_parameters
 
-    # def model_evaluate(self) -> AutomatedML:
-    #     """
-    #     Regression evaluation method of an estimator.
+            pipe_single_study = Pipeline([
+                ('poly', poly),
+                ('spline', spline),
+                ('scaler', scaler),
+                ('pca', pca),
+                ('model', model_final)]
+            )
+            estimators.append((model_name, pipe_single_study))
+        self.estimators = estimators
 
-    #     This method will evaluate the regression performance of the estimators specified in 'list_regressors_assess' by
-    #     splitting the test data into folds according to the cross-validation specified, training the estimators on the
-    #     training data and evaluating the predictions on the test data. The performance will be stored in a dictionary
-    #     per metric per estimator. If the estimator is the stacked regressor, it will be saved to disk.
+        return self
 
-    #     Returns
-    #     -------
-    #     class instance
-    #     """
+    def model_evaluate(self) -> AutomatedML:
+        """
+        Regression evaluation method of an estimator.
+
+        This method will evaluate the regression performance of the estimators specified in 'list_regressors_assess' by
+        splitting the test data into folds according to the cross-validation specified, training the estimators on the
+        training data and evaluating the predictions on the test data. The performance will be stored in a dictionary
+        per metric per estimator. If the estimator is the stacked regressor, it will be saved to disk.
+
+        Returns
+        -------
+        class instance
+        """
         
-    #     # -- check whether split_train_test method has been performed, else perform it
-    #     if getattr(self, 'X_train') is None: self.split_train_test()
+        # -- check whether split_train_test method has been performed, else perform it
+        if getattr(self, 'X_train') is None: self.split_train_test()
 
-    #     # -- split data according to cross validation for assessment
-    #     indexes_test_cv = list(self.cross_validation.split(self.X_test))
+        # -- split data according to cross validation for assessment
+        indexes_test_cv = list(self.cross_validation.split(self.X_test))
 
-    #     # -- determine names of regressors to assess
-    #     regressors_to_assess = self.list_regressors_assess + ['stacked']
+        # -- determine names of models to assess
+        models_to_assess = self.list_model_assess + ['stacked']
 
-    #     # -- create an empty dictionary to populate with performance while looping over regressors
-    #     summary = dict([(regressor, list()) for regressor in regressors_to_assess])
+        # -- create an empty dictionary to populate with performance while looping over regressors
+        summary = dict([(model, list()) for model in models_to_assess])
 
-    #     for i, regressor in enumerate(regressors_to_assess):
-    #         estimator_temp = self.estimators[i:i + 1]
+        for i, model in enumerate(models_to_assess):
+            estimator_temp = self.estimators[i:i + 1]
 
-    #         # -- the final regressor is the stacked regressor
-    #         if i == len(self.estimators):
-    #             estimator_temp = self.estimators
+            # -- the final regressor is the stacked regressor
+            if i == len(self.estimators):
+                estimator_temp = self.estimators
 
-    #             # -- fit stacked regressor while catching warnings
-    #             regressor_final = StackingRegressor(estimators=estimator_temp,
-    #                                                 final_estimator=Ridge(random_state=self.random_state),
-    #                                                 cv=self.cross_validation)
-    #             FuncHelper.function_warning_catcher(regressor_final.fit, [self.X_train, self.y_train],
-    #                                                 self.warning_verbosity)
+                # -- fit stacked model while catching warnings
+                if self.ml_objective == 'regression':
+                    model_final = StackingRegressor(estimators=estimator_temp,
+                                                        final_estimator=Ridge(random_state=self.random_state),
+                                                        cv=self.cross_validation)
+                elif self.ml_objective == 'classification':
+                    model_final = StackingClassifier(estimators=estimator_temp,
+                                                        final_estimator=RidgeClassifier(random_state=self.random_state),
+                                                        cv=self.cross_validation)
+                    
+                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                                                    self.warning_verbosity)
+                
+                
 
-    #             # -- predict on the whole testing dataset
-    #             self.y_pred = regressor_final.predict(self.X_test)
+                # -- predict on the whole testing dataset
+                self.y_pred = model_final.predict(self.X_test)
 
-    #             # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite
-    #             write_file_stacked_regressor = self.write_folder + "stacked_regressor.joblib"
-    #             if os.path.isfile(write_file_stacked_regressor):
-    #                 if not self.overwrite:
-    #                     question = "Stacked Regressor already exists in directory but overwrite set to 'False'. " \
-    #                                "Overwrite anyway ? (y/n):"
-    #                     user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
-    #                     if user_input != 'y':
-    #                         response = "Stacked regressor not saved"
-    #                         print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
-    #                 if self.overwrite:
-    #                     question = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you " \
-    #                               "certain ? (y/n):"
-    #                     user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
-    #                     if user_input != 'n':
-    #                         response = "Stacked Regressor overwritten"
-    #                         print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
-    #                         joblib.dump(regressor_final, write_file_stacked_regressor)
+                # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite
+                write_file_stacked_model = self.write_folder + "stacked_regressor.joblib"
+                if os.path.isfile(write_file_stacked_model):
+                    if not self.overwrite:
+                        question = "Stacked model already exists in directory but overwrite set to 'False'. " \
+                                    "Overwrite anyway ? (y/n):"
+                        user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
+                        if user_input != 'y':
+                            response = "Stacked regressor not saved"
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
+                    if self.overwrite:
+                        question = "Stacked model already exists in directory. Overwrite set to 'TRUE'. Are you " \
+                                  "certain ? (y/n):"
+                        user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
+                        if user_input != 'n':
+                            response = "Stacked Regressor overwritten"
+                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
+                            joblib.dump(model_final, write_file_stacked_model)
 
-    #             # -- if file doesn't exist, write it
-    #             if not os.path.isfile(write_file_stacked_regressor):
-    #                 joblib.dump(regressor_final, write_file_stacked_regressor)
+                # -- if file doesn't exist, write it
+                if not os.path.isfile(write_file_stacked_model):
+                    joblib.dump(model_final, write_file_stacked_model)
 
-    #         else:
-    #             regressor_final = estimator_temp[0][1]
-    #             FuncHelper.function_warning_catcher(regressor_final.fit, [self.X_train, self.y_train],
-    #                                                 self.warning_verbosity)
+            else:
+                model_final = estimator_temp[0][1]
+                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                                                    self.warning_verbosity)
 
-    #         # -- create dictionary with elements per metric allowing per metric fold performance to be stored
-    #         metric_performance_dict = dict(
-    #             [('metric_' + str(i), [metric, list()]) for i, metric in enumerate(self.metric_assess)])
+            # -- create dictionary with elements per metric allowing per metric fold performance to be stored
+            metric_performance_dict = dict(
+                [('metric_' + str(i), [metric, list()]) for i, metric in enumerate(self.metric_assess)])
 
-    #         # -- For each TEST data fold...
-    #         for idx_fold, fold in enumerate(indexes_test_cv):
-    #             # -- Select the fold indexes
-    #             fold_test = fold[1]
+            # -- For each TEST data fold...
+            for idx_fold, fold in enumerate(indexes_test_cv):
+                # -- Select the fold indexes
+                fold_test = fold[1]
 
-    #             # -- Predict on the TEST data fold
-    #             prediction = regressor_final.predict(self.X_test[fold_test, :])
+                # -- Predict on the TEST data fold
+                prediction = model_final.predict(self.X_test[fold_test, :])
 
-    #             # -- Assess prediction per metric and store per-fold performance in dictionary
-    #             [metric_performance_dict[key][1].append(
-    #                 metric_performance_dict[key][0](self.y_test[fold_test], prediction))
-    #              for key in metric_performance_dict]
+                # -- Assess prediction per metric and store per-fold performance in dictionary
+                [metric_performance_dict[key][1].append(
+                    metric_performance_dict[key][0](self.y_test[fold_test], prediction))
+                  for key in metric_performance_dict]
 
-    #         # -- store mean and standard deviation of performance over folds per regressor
-    #         summary[regressor] = [
-    #             [np.mean(metric_performance_dict[key][1]), np.std(metric_performance_dict[key][1])] for key in
-    #             metric_performance_dict]
+            # -- store mean and standard deviation of performance over folds per regressor
+            summary[model] = [
+                [np.mean(metric_performance_dict[key][1]), np.std(metric_performance_dict[key][1])] for key in
+                metric_performance_dict]
 
-    #         self.summary = summary
+            self.summary = summary
 
-    #     return self
+        return self
 
-    # def apply(self):
-    #     self.split_train_test()
-    #     self.regression_hyperoptimise()
-    #     self.regression_select_best()
-    #     self.regression_evaluate()
-    #     return self
+    def apply(self, stratify = None):
+        self.split_train_test(stratify = stratify)
+        self.regression_hyperoptimise()
+        self.regression_select_best()
+        self.regression_evaluate()
+        return self
     
     
 #%%
     
 class AutomatedRegression(AutomatedML):
+    
     def __init__(self,
                   y: pd.DataFrame,
                   X: pd.DataFrame,
@@ -618,13 +640,13 @@ class AutomatedRegression(AutomatedML):
                   random_state: Union[int, type(None)] = 42,
                   warning_verbosity: str = 'ignore'):
         
-        self.regressors_2_optimise = regressor_selector(regressor_names=list_regressors_optimise,
-                                                        random_state=random_state)
+        self.ml_objective = 'regression'
         list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
             list_regressors_assess
-        self.regressors_2_assess = regressor_selector(regressor_names=list_regressors_assess,
+        self.model_optimise = regressor_selector(regressor_names=list_regressors_optimise,
+                                                        random_state=random_state)
+        self.model_assess = regressor_selector(regressor_names=list_regressors_assess,
                                                       random_state=random_state)
-        self.ml_objective = 'regression'
 
         super().__init__(y = y,
                           X = X,
@@ -634,27 +656,87 @@ class AutomatedRegression(AutomatedML):
                           cross_validation = cross_validation, 
                           sampler = sampler, 
                           pruner = pruner, 
-                          ml_objective = self.ml_objective,
                           poly_value= poly_value,
                           spline_value = spline_value,
                           pca_value = pca_value, 
                           metric_optimise = metric_optimise,
-                          metric_assess = metric_assess,
-                          model_optimise = self.regressors_2_optimise, 
-                          model_assess = self.regressors_2_assess,
+                          metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess,
+                          model_optimise = self.model_optimise, 
+                          model_assess = self.model_assess,
                           optimisation_direction = optimisation_direction, 
                           write_folder = write_folder, 
                           overwrite = overwrite,
                           fit_frac = fit_frac,
                           random_state = random_state,
-                          warning_verbosity = warning_verbosity)
-        
-        
-    def test(self):
-        print(self.y)
+                          warning_verbosity = warning_verbosity,
+                          ml_objective = 'regression')
                          
                             
         
+class AutomatedClassification(AutomatedML):
+    
+    def __init__(self,
+                  y: pd.DataFrame,
+                  X: pd.DataFrame,
+                  test_frac: float = 0.2,
+                  timeout: int = 600,
+                  n_trial: int = 100,
+                  cross_validation: callable = None,
+                  sampler: callable = None,
+                  pruner: callable = None,
+                  poly_value: Union[int, float, dict, type(None)] = None,
+                  spline_value: Union[int, float, dict, type(None)] = None,
+                  pca_value: Union[int, float, dict, type(None)] = None,
+                  metric_optimise: Callable = accuracy_score,
+                  metric_assess: List[Callable] = None,
+                  list_classifiers_optimise = None,
+                  list_classifiers_assess = None,
+                  optimisation_direction: str = 'maximize',
+                  write_folder: str = os.getcwd() + '/auto_regression/',
+                  overwrite: bool = False,
+                  list_optimise: List[str] = None,
+                  list_assess: List[str] = None,
+                  fit_frac: List[float] = None,
+                  random_state: Union[int, type(None)] = 42,
+                  warning_verbosity: str = 'ignore'):
         
+        list_classifiers_assess = list_classifiers_optimise if list_classifiers_assess is None else \
+            list_classifiers_assess
+        n_classes = len(set(y)) + 1
+        self.model_optimise = classifier_selector(classifier_names=list_classifiers_optimise,
+                                                        random_state=random_state, n_classes = n_classes)
+        self.model_assess = classifier_selector(classifier_names=list_classifiers_assess,
+                                                      random_state=random_state, n_classes = n_classes)
+        precision_score_macro = [lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')]
+
+        super().__init__(y = y,
+                          X = X,
+                          test_frac = test_frac,
+                          timeout = timeout,
+                          n_trial = n_trial,
+                          cross_validation = cross_validation, 
+                          sampler = sampler, 
+                          pruner = pruner, 
+                          poly_value= poly_value,
+                          spline_value = spline_value,
+                          pca_value = pca_value, 
+                          metric_optimise = metric_optimise,
+                          metric_assess = [accuracy_score, precision_score_macro] if \
+                              metric_assess is None else metric_assess,
+                          list_model_optimise = list_classifiers_optimise,
+                          list_model_assess = list_classifiers_assess,
+                          model_optimise = self.model_optimise, 
+                          model_assess = self.model_assess,
+                          optimisation_direction = optimisation_direction, 
+                          write_folder = write_folder, 
+                          overwrite = overwrite,
+                          fit_frac = fit_frac,
+                          random_state = random_state,
+                          warning_verbosity = warning_verbosity,
+                          ml_objective = 'classification')
+        
+        
+    def apply(self):
+        return super().apply(stratify = self.y)
     
 
