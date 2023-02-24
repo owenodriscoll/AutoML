@@ -33,20 +33,20 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     
     """
 
-    methods = ['dummy', 'lightgbm', 
-               # 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
+    methods = ['dummy', 'lightgbm', 'xgboost'
+               , 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
                #    'knn', 'sgd', 'bagging', 'svr', 'elasticnet'
                   ]
     selected_methods = list(set(classifier_names) & set(methods))
     if selected_methods == []:
-        return print('no valid regressor names provided')
+        return print('no valid classifier names provided')
     
     # -- only load the regressor and import relevant package if provided regressor is in the list of pre-defined regressors
     method_dict = {}
     method_dict['dummy'] = dummy_loader() if 'dummy' in selected_methods else None
     method_dict['lightgbm'] = lightgbm_loader(n_classes = n_classes, random_state = random_state) if 'lightgbm' in selected_methods else None
-    # method_dict['xgboost'] = xgboost_loader(random_state = random_state) if 'xgboost' in selected_methods else None
-    # method_dict['catboost'] = catboost_loader(random_state = random_state) if 'catboost' in selected_methods else None
+    method_dict['xgboost'] = xgboost_loader(random_state = random_state) if 'xgboost' in selected_methods else None
+    method_dict['catboost'] = catboost_loader(random_state = random_state) if 'catboost' in selected_methods else None
     # method_dict['bayesianridge'] = bayesianridge_loader() if 'bayesianridge' in selected_methods else None
     # method_dict['lassolars'] = lassolars_loader(random_state = random_state) if 'lassolars' in selected_methods else None
     # method_dict['adaboost'] = adaboost_loader(random_state = random_state) if 'adaboost' in selected_methods else None
@@ -103,74 +103,83 @@ def lightgbm_loader(random_state, n_classes):
 
 
 
-# def xgboost_loader(random_state):
+def xgboost_loader(random_state):
     
-#     from xgboost import XGBRegressor
+    from xgboost import XGBClassifier
     
-#     def xgboostHParams(trial):
-#         param_dict = {}
-#         param_dict['booster'] = trial.suggest_categorical("booster", ['gbtree', 'gblinear', 'dart'])
-#         param_dict['lambda'] = trial.suggest_float("lambda", 1e-8, 10.0, log = True)
-#         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 10.0, log = True)
-#         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-#         param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
+    def xgboostHParams(trial):
+        param_dict = {}
+        param_dict['booster'] = trial.suggest_categorical("booster", ['gbtree', 'gblinear', 'dart'])
+        param_dict['lambda'] = trial.suggest_float("lambda", 1e-8, 10.0, log = True)
+        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 10.0, log = True)
+        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
+        param_dict['verbosity'] = trial.suggest_categorical("verbosity", [0])
         
-#         if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
+        if (param_dict['booster'] == 'gbtree') or (param_dict['booster'] == 'dart') :
             
-#             param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 14, log = False)  
+            param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 14, log = False)  
             
-#             # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-#             if (param_dict['max_depth'] >= 12) :
-#                 max_n_estimators = 200; min_eta = 1e-2
-#             elif (param_dict['max_depth'] >= 10) :
-#                 max_n_estimators = 300; min_eta = 1e-3 # change to if >= 10, elif >= 8, else 
-#             else :
-#                 max_n_estimators = 400; min_eta = 1e-4
+            # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
+            if (param_dict['max_depth'] >= 12) :
+                max_n_estimators = 200; min_eta = 1e-2
+            elif (param_dict['max_depth'] >= 10) :
+                max_n_estimators = 300; min_eta = 1e-3 # change to if >= 10, elif >= 8, else 
+            else :
+                max_n_estimators = 400; min_eta = 1e-4
                 
-#             param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, max_n_estimators, log=False) 
-#             param_dict['eta'] = trial.suggest_float("eta", min_eta, 1.0, log = True)   
-#             param_dict['min_child_weight'] = trial.suggest_float("min_child_weight", 0, 10, log = False)
-#             param_dict['gamma'] = trial.suggest_float("gamma", 0, 10, log = False)
-#             param_dict['subsample'] = trial.suggest_float("subsample", 0.1, 1.0, log = False)
-#             param_dict['colsample_bytree'] = trial.suggest_float("colsample_bytree", 0.1, 1.0, log = False)
-#             param_dict['max_bin'] = trial.suggest_categorical("max_bin", [64, 128, 256, 512, 1024])    # performance boost when power of 2 (NOT -1)
+            param_dict['n_estimators'] = trial.suggest_int("n_estimators", 20, max_n_estimators, log=False) 
+            param_dict['eta'] = trial.suggest_float("eta", min_eta, 1.0, log = True)   
+            param_dict['min_child_weight'] = trial.suggest_float("min_child_weight", 0, 10, log = False)
+            param_dict['gamma'] = trial.suggest_float("gamma", 0, 10, log = False)
+            param_dict['subsample'] = trial.suggest_float("subsample", 0.1, 1.0, log = False)
+            param_dict['colsample_bytree'] = trial.suggest_float("colsample_bytree", 0.1, 1.0, log = False)
+            param_dict['max_bin'] = trial.suggest_categorical("max_bin", [64, 128, 256, 512, 1024])    # performance boost when power of 2 (NOT -1)
         
-#             if (param_dict['booster'] == 'dart') :
-#                 param_dict['sample_type'] = trial.suggest_categorical("sample_type", ['uniform', 'weighted'])
-#                 param_dict['normalize_type'] = trial.suggest_categorical("normalize_type", ['tree', 'forest'])
-#                 param_dict['rate_drop'] = trial.suggest_float("rate_drop", 0., 1.0, log = False)
-#                 param_dict['one_drop'] = trial.suggest_categorical("one_drop", [0, 1])
-#         return param_dict
+            if (param_dict['booster'] == 'dart') :
+                param_dict['sample_type'] = trial.suggest_categorical("sample_type", ['uniform', 'weighted'])
+                param_dict['normalize_type'] = trial.suggest_categorical("normalize_type", ['tree', 'forest'])
+                param_dict['rate_drop'] = trial.suggest_float("rate_drop", 0., 1.0, log = False)
+                param_dict['one_drop'] = trial.suggest_categorical("one_drop", [0, 1])
+        return param_dict
     
-#     return (XGBRegressor, xgboostHParams)
+    return (XGBClassifier, xgboostHParams)
 
 
-# def catboost_loader(random_state):
+def catboost_loader(random_state):
     
-#     from catboost import CatBoostRegressor
+    from catboost import CatBoostClassifier
     
-#     def catboostHParams(trial):
-#         param_dict = {}
-#         param_dict['depth'] = trial.suggest_int("depth", 1, 10, log = False) # maybe increase?
+    def catboostHParams(trial):
+        param_dict = {}
+        param_dict['depth'] = trial.suggest_int("depth", 1, 10, log = False) # maybe increase?
         
-#         # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
-#         if (param_dict['depth'] >= 8) :
-#             max_iterations = 300; min_learning_rate = 1e-2
-#         elif (param_dict['depth'] >= 6) :
-#             max_iterations = 400; min_learning_rate = 5e-3
-#         else :
-#             max_iterations = 500; min_learning_rate = 1e-3
+        # -- prevent the tree from exploding by limiting number of estimators and training size for larger depths
+        if (param_dict['depth'] >= 8) :
+            max_iterations = 300; min_learning_rate = 1e-2
+        elif (param_dict['depth'] >= 6) :
+            max_iterations = 400; min_learning_rate = 5e-3
+        else :
+            max_iterations = 500; min_learning_rate = 1e-3
                 
-#         param_dict['iterations'] = trial.suggest_int("iterations", 20, max_iterations, log = True)
-#         param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
-#         param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
-#         param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
-#         param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [5])
-#         param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
-#         param_dict['random_seed'] = trial.suggest_categorical("random_seed", [random_state])
-#         return param_dict
+        param_dict['iterations'] = trial.suggest_int("iterations", 20, max_iterations, log = True)
+        param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)  
+        param_dict['l2_leaf_reg'] = trial.suggest_float("l2_leaf_reg", 1e-2, 1e1, log = True)
+        param_dict['rsm'] = trial.suggest_float("rsm", 1e-2, 1e0, log = False)
+        # param_dict['early_stopping_rounds'] =  trial.suggest_categorical("early_stopping_rounds", [5])
+        param_dict['logging_level'] = trial.suggest_categorical("logging_level", ['Silent'])
+        param_dict['random_seed'] = trial.suggest_categorical("random_seed", [random_state])
+        # param_dict['grow_policy'] = trial.suggest_categorical("grow_policy", ['SymmetricTree', 'Depthwise', 'Lossguide'])
+        
+        # -- parameter errors out of None provided, so only include when not None
+        # param_dict['auto_class_weights'] = trial.suggest_categorical("auto_class_weights", [None, 'Balanced', 'SqrtBalanced'])
+        auto_class_weights = trial.suggest_categorical("auto_class_weights", [None, 'Balanced', 'SqrtBalanced'])
+        if auto_class_weights != None:
+            param_dict['auto_class_weights'] = auto_class_weights
+        
+        
+        return param_dict
     
-#     return (CatBoostRegressor, catboostHParams)
+    return (CatBoostClassifier, catboostHParams)
 
 # def bayesianridge_loader():
     
