@@ -20,7 +20,6 @@ from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.classifiers import classifier_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
-# include categorical feature support
 # try polynomial features with interactions_only = True, include_bias = False
 # add warning to user if non int/flaot valeus detected in column, sugegst specifying column as ordinal or categorical
 # add conversion from arrays to Dataframe is the former is submitted
@@ -397,8 +396,6 @@ class AutomatedML:
                         set([model_name]) & set(['lightgbm', 'xgboost', 'catboost']))
 
                     # -- fit training data and add early stopping function if X-iterations did not improve data
-                    # ... if regressor is boosted ...
-                    if model_is_boosted:
                     if early_stopping_permitted:
                         # During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during
@@ -494,10 +491,10 @@ class AutomatedML:
 
             # -- select parameters corresponding to regressor
             list_params = list(study.best_params)
-            list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
+            list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
                                          'transformers', 'n_quantiles']
-            list_params_regressor = set(list_params).difference(set(list_params_not_regressor))
-            parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
+            list_params_model = set(list_params).difference(set(list_params_not_model))
+            parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_model)}
 
 
             # -- select all the pipeline steps corresponding to input settings or best trial
@@ -581,7 +578,6 @@ class AutomatedML:
                                                     self.warning_verbosity)
 
 
-
                 # -- predict on the whole testing dataset
                 self.y_pred = model_final.predict(self.X_test)
 
@@ -641,9 +637,9 @@ class AutomatedML:
 
     def apply(self, stratify = None):
         self.split_train_test(stratify = stratify)
-        self.regression_hyperoptimise()
-        self.regression_select_best()
-        self.regression_evaluate()
+        self.model_hyperoptimise()
+        self.model_select_best()
+        self.model_evaluate()
 
         return self
 
@@ -658,6 +654,8 @@ class AutomatedRegression(AutomatedML):
                   test_frac: float = 0.2,
                   timeout: int = 600,
                   n_trial: int = 100,
+                  nominal_columns: Union[List[str], type(None)] = None,
+                  ordinal_columns: Union[List[str], type(None)] = None,
                   cross_validation: callable = None,
                   sampler: callable = None,
                   pruner: callable = None,
@@ -674,6 +672,7 @@ class AutomatedRegression(AutomatedML):
                   list_optimise: List[str] = None,
                   list_assess: List[str] = None,
                   fit_frac: List[float] = None,
+                  boosted_early_stopping_rounds: int = 20,
                   random_state: Union[int, type(None)] = 42,
                   warning_verbosity: str = 'ignore'):
 
@@ -690,6 +689,8 @@ class AutomatedRegression(AutomatedML):
                           test_frac = test_frac,
                           timeout = timeout,
                           n_trial = n_trial,
+                          nominal_columns = nominal_columns,
+                          ordinal_columns = ordinal_columns,
                           cross_validation = cross_validation,
                           sampler = sampler,
                           pruner = pruner,
@@ -698,6 +699,8 @@ class AutomatedRegression(AutomatedML):
                           pca_value = pca_value,
                           metric_optimise = metric_optimise,
                           metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess,
+                          list_model_optimise = list_regressors_optimise,
+                          list_model_assess = list_regressors_assess,
                           model_optimise = self.model_optimise,
                           model_assess = self.model_assess,
                           optimisation_direction = optimisation_direction,
@@ -705,6 +708,7 @@ class AutomatedRegression(AutomatedML):
                           overwrite = overwrite,
                           fit_frac = fit_frac,
                           random_state = random_state,
+                          boosted_early_stopping_rounds = boosted_early_stopping_rounds,
                           warning_verbosity = warning_verbosity,
                           ml_objective = 'regression')
 
@@ -718,6 +722,8 @@ class AutomatedClassification(AutomatedML):
                   test_frac: float = 0.2,
                   timeout: int = 600,
                   n_trial: int = 100,
+                  nominal_columns: Union[List[str], type(None)] = None,
+                  ordinal_columns: Union[List[str], type(None)] = None,
                   cross_validation: callable = None,
                   sampler: callable = None,
                   pruner: callable = None,
@@ -734,6 +740,7 @@ class AutomatedClassification(AutomatedML):
                   list_optimise: List[str] = None,
                   list_assess: List[str] = None,
                   fit_frac: List[float] = None,
+                  boosted_early_stopping_rounds: int = 20,
                   random_state: Union[int, type(None)] = 42,
                   warning_verbosity: str = 'ignore'):
 
@@ -751,6 +758,8 @@ class AutomatedClassification(AutomatedML):
                           test_frac = test_frac,
                           timeout = timeout,
                           n_trial = n_trial,
+                          nominal_columns = nominal_columns,
+                          ordinal_columns = ordinal_columns,
                           cross_validation = cross_validation,
                           sampler = sampler,
                           pruner = pruner,
@@ -769,6 +778,7 @@ class AutomatedClassification(AutomatedML):
                           overwrite = overwrite,
                           fit_frac = fit_frac,
                           random_state = random_state,
+                          boosted_early_stopping_rounds = boosted_early_stopping_rounds,
                           warning_verbosity = warning_verbosity,
                           ml_objective = 'classification')
 
