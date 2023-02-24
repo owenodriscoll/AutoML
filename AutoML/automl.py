@@ -23,7 +23,8 @@ from AutoML.AutoML.function_helper import FuncHelper
 # try polynomial features with interactions_only = True, include_bias = False
 # add warning to user if non int/flaot valeus detected in column, sugegst specifying column as ordinal or categorical
 # add conversion from arrays to Dataframe is the former is submitted
-
+# boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
+# maybe train several weak models (for instance multiple constrained catboosts, xgboosts etc), and then stack
 
 class AutomatedML:
     def __init__(self,
