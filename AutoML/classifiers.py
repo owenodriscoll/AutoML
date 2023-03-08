@@ -22,8 +22,8 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     Parameters
     ----------
     regressor_names : list of str, regressor names with the following options:
-        'dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 
-        'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet'
+        'dummy', 'lightgbm', 'xgboost', 'catboost', 'adaboost', 
+        'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svc'
     n_classes
     random_state : int, reproduceability state for regressors with randomization options
     
@@ -33,9 +33,8 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     
     """
 
-    methods = ['dummy', 'lightgbm', 'xgboost'
-               , 'catboost', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
-               #    'knn', 'sgd', 'bagging', 'svr', 'elasticnet'
+    methods = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'lassolars', 'adaboost',
+               'gradientboost', 'histgradientboost','knn', 'sgd', 'bagging', 'svc'
                   ]
     selected_methods = list(set(classifier_names) & set(methods))
     if selected_methods == []:
@@ -50,12 +49,11 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     method_dict['adaboost'] = adaboost_loader(random_state = random_state) if 'adaboost' in selected_methods else None
     method_dict['gradientboost'] = gradientboost_loader(random_state = random_state) if 'gradientboost' in selected_methods else None
     method_dict['histgradientboost'] = histgradientboost_loader(random_state = random_state) if 'histgradientboost' in selected_methods else None
-    # method_dict['knn'] = knn_loader() if 'knn' in selected_methods else None
-    # method_dict['sgd'] = sgd_loader(random_state = random_state) if 'sgd' in selected_methods else None
-    # method_dict['bagging'] = bagging_loader(random_state = random_state) if 'bagging' in selected_methods else None
-    # method_dict['svr'] = svr_loader(random_state = random_state) if 'svr' in selected_methods else None
-    # method_dict['elasticnet'] = elasticnet_loader(random_state = random_state) if 'elasticnet' in selected_methods else None
-    
+    method_dict['knn'] = knn_loader() if 'knn' in selected_methods else None
+    method_dict['sgd'] = sgd_loader(random_state = random_state) if 'sgd' in selected_methods else None
+    method_dict['bagging'] = bagging_loader(random_state = random_state) if 'bagging' in selected_methods else None
+    method_dict['svc'] = svc_loader(random_state = random_state) if 'svc' in selected_methods else None
+
     # -- remove dictionary elements where regressor was not loaded
     method_dict_none_rem = {k: v for k, v in method_dict.items() if v is not None}
     
@@ -98,7 +96,6 @@ def lightgbm_loader(random_state, n_classes):
         return param_dict
     
     return (LGBMClassifier, lightgbmHParams)
-
 
 
 def xgboost_loader(random_state):
@@ -237,73 +234,73 @@ def histgradientboost_loader(random_state):
     return (HistGradientBoostingClassifier, histGradBoostHParams)
 
 
-# def knn_loader():
+def knn_loader():
     
-#     from sklearn.neighbors import KNeighborsRegressor
+    from sklearn.neighbors import KNeighborsClassifier
     
-#     def KNearNeighboursHParams(trial):
-#         param_dict = {}
-#         param_dict['n_neighbors'] = trial.suggest_int("n_neighbors", 1, 101, step = 5)
-#         param_dict['weights'] = trial.suggest_categorical("weights", ['uniform', 'distance'])
-#         return param_dict
+    def KNearNeighboursHParams(trial):
+        param_dict = {}
+        param_dict['n_neighbors'] = trial.suggest_int("n_neighbors", 1, 101, step = 5)
+        param_dict['weights'] = trial.suggest_categorical("weights", ['uniform', 'distance'])
+        return param_dict
     
-#     return (KNeighborsRegressor, KNearNeighboursHParams)
+    return (KNeighborsClassifier, KNearNeighboursHParams)
 
 
-# def sgd_loader(random_state):
+def sgd_loader(random_state):
     
-#     from sklearn.neighbors import SGDRegressor
+    from sklearn.neighbors import SGDClassifier
     
-#     def sgdHParams(trial):
-#         param_dict = {}
-#         param_dict['loss'] =  trial.suggest_categorical("loss", ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'])
-#         param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet'])
-#         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-#         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def sgdHParams(trial):
+        param_dict = {}
+        param_dict['loss'] =  trial.suggest_categorical("loss", ['hinge', 'log_loss', 'squared_error', 
+                                                                 'huber', 'epsilon_insensitive', 
+                                                                 'squared_epsilon_insensitive',
+                                                                 'modified_huber', 'squared_hinge', 
+                                                                 'perceptron', 
+                                                                 ])
+        param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet'])
+        param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
+        if (param_dict['penalty'] == 'elasticnet') :
+            param_dict['l1_ratio'] = trial.suggest_float("l1_ratio", 0, 1, log = False)
+        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
+        
+        return param_dict
     
-#     return (SGDRegressor, sgdHParams)
+    return (SGDClassifier, sgdHParams)
 
 
-# def bagging_loader(random_state):
+def bagging_loader(random_state):
     
-#     from sklearn.ensemble import BaggingRegressor
+    from sklearn.ensemble import BaggingClassifier
     
-#     def baggingHParams(trial):
-#         param_dict = {}
-#         param_dict['n_estimators'] =  trial.suggest_int("n_estimators", 1, 101, step = 5)
-#         param_dict['max_features'] = trial.suggest_float("max_features", 1e-1, 1.0, step = 0.1)
-#         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def baggingHParams(trial):
+        param_dict = {}
+        param_dict['n_estimators'] =  trial.suggest_int("n_estimators", 1, 101, step = 5)
+        param_dict['max_samples'] = trial.suggest_float("max_samples", 1e-1, 1.0, step = 0.1)
+        param_dict['max_features'] = trial.suggest_float("max_features", 1e-1, 1.0, step = 0.1)
+        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
+        param_dict['bootstrap'] =  trial.suggest_categorical("bootstrap", [True, False])
+        param_dict['bootstrap_features'] =  trial.suggest_categorical("bootstrap_features", [True, False])
+        
+        return param_dict
     
-#     return (BaggingRegressor, baggingHParams)
+    return (BaggingClassifier, baggingHParams)
 
 
-# def svr_loader(random_state):
+def svc_loader(random_state):
     
-#     from sklearn.svm import LinearSVR
+    from sklearn.svm import LinearSVC
     
-#     def svrHParams(trial):
-#         param_dict = {}
-#         param_dict['loss'] = trial.suggest_categorical("loss", ['epsilon_insensitive', 'squared_epsilon_insensitive'])
-#         param_dict['C'] = trial.suggest_float("C", 1e-5, 1e2, log = True)
-#         param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2, log = True)
-#         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def svcHParams(trial):
+        param_dict = {}
+        param_dict['loss'] = trial.suggest_categorical("loss", ['hinge', 'squared_hinge'])
+        param_dict['penalty'] = trial.suggest_categorical("penalty", ['l1', 'l2'])
+        param_dict['C'] = trial.suggest_float("C", 1e-5, 1e2, log = True)
+        param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2, log = True)
+        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
+        return param_dict
     
-#     return (LinearSVR, svrHParams)
+    return (LinearSVC, svcHParams)
     
-    
-# def elasticnet_loader(random_state):
-    
-#     from sklearn.linear_model import ElasticNet
-    
-#     def elasticnetHParams(trial):
-#         param_dict = {}
-#         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-#         param_dict['l1_ratio'] = trial.suggest_float("l1_ratio", 1e-5, 1.0, log = True)
-#         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
-    
-#     return (ElasticNet, elasticnetHParams)
-    
+
