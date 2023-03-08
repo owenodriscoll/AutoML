@@ -34,7 +34,7 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     """
 
     methods = ['dummy', 'lightgbm', 'xgboost'
-               , 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
+               , 'catboost', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
                #    'knn', 'sgd', 'bagging', 'svr', 'elasticnet'
                   ]
     selected_methods = list(set(classifier_names) & set(methods))
@@ -47,11 +47,9 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     method_dict['lightgbm'] = lightgbm_loader(n_classes = n_classes, random_state = random_state) if 'lightgbm' in selected_methods else None
     method_dict['xgboost'] = xgboost_loader(random_state = random_state) if 'xgboost' in selected_methods else None
     method_dict['catboost'] = catboost_loader(random_state = random_state) if 'catboost' in selected_methods else None
-    # method_dict['bayesianridge'] = bayesianridge_loader() if 'bayesianridge' in selected_methods else None
-    # method_dict['lassolars'] = lassolars_loader(random_state = random_state) if 'lassolars' in selected_methods else None
-    # method_dict['adaboost'] = adaboost_loader(random_state = random_state) if 'adaboost' in selected_methods else None
-    # method_dict['gradientboost'] = gradientboost_loader(random_state = random_state) if 'gradientboost' in selected_methods else None
-    # method_dict['histgradientboost'] = histgradientboost_loader(random_state = random_state) if 'histgradientboost' in selected_methods else None
+    method_dict['adaboost'] = adaboost_loader(random_state = random_state) if 'adaboost' in selected_methods else None
+    method_dict['gradientboost'] = gradientboost_loader(random_state = random_state) if 'gradientboost' in selected_methods else None
+    method_dict['histgradientboost'] = histgradientboost_loader(random_state = random_state) if 'histgradientboost' in selected_methods else None
     # method_dict['knn'] = knn_loader() if 'knn' in selected_methods else None
     # method_dict['sgd'] = sgd_loader(random_state = random_state) if 'sgd' in selected_methods else None
     # method_dict['bagging'] = bagging_loader(random_state = random_state) if 'bagging' in selected_methods else None
@@ -178,89 +176,65 @@ def catboost_loader(random_state):
         return param_dict
     
     return (CatBoostClassifier, catboostHParams)
-
-# def bayesianridge_loader():
-    
-#     from sklearn.linear_model import BayesianRidge
-    
-#     def bayesianRidgeHParams(trial):
-#         param_dict = {}
-#         param_dict['n_iter'] = trial.suggest_int("n_iter", 10, 400)
-#         param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2)
-#         param_dict['alpha_1'] =  trial.suggest_float("alpha_1", 1e-8, 1e2, log = True)
-#         param_dict['alpha_2'] = trial.suggest_float("alpha_2", 1e-8, 1e2, log = True)
-#         param_dict['lambda_1'] = trial.suggest_float("lambda_1", 1e-8, 1e2, log = True)
-#         param_dict['lambda_2'] = trial.suggest_float("lambda_2", 1e-8, 1e2, log = True)
-#         return param_dict
-    
-#     return (BayesianRidge, bayesianRidgeHParams)
-
-
-# def lassolars_loader(random_state):
-    
-#     from sklearn.linear_model import LassoLars
-    
-#     def lassoLarsHParams(trial):
-#         param_dict = {}
-#         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-#         param_dict['normalize'] = trial.suggest_categorical("normalize", [False])
-#         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
-    
-#     return (LassoLars, lassoLarsHParams)
     
 
-# def adaboost_loader(random_state):
+def adaboost_loader(random_state):
     
-#     from sklearn.ensemble import AdaBoostRegressor
+    from sklearn.ensemble import AdaBoostClassifier
     
-#     def adaBoostHParams(trial):
-#         param_dict = {}
-#         param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, 200)
-#         param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
-#         param_dict['loss'] = trial.suggest_categorical("loss", ['linear', 'square', 'exponential'])
-#         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def adaBoostHParams(trial):
+        param_dict = {}
+        param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, 200)
+        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
+        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
+        return param_dict
     
-#     return (AdaBoostRegressor, adaBoostHParams)
+    return (AdaBoostClassifier, adaBoostHParams)
 
 
-# def gradientboost_loader(random_state):
+def gradientboost_loader(random_state):
     
-#     from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.ensemble import GradientBoostingClassifier
     
-#     def gradBoostHParams(trial):
-#         param_dict = {}
-#         param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, 300)
-#         param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
-#         param_dict['subsample'] = trial.suggest_float("subsample", 1e-2, 1.0, log = False)
-#         param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 10)
-#         param_dict['criterion'] = trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error'])
-#         param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'huber', 'quantile'])
-#         param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20])
-#         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def gradBoostHParams(trial):
+        param_dict = {}
+        
+        param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 10)
+        if (param_dict['max_depth'] >= 8) :
+            max_iterations = 200; min_learning_rate = 5e-2
+        elif (param_dict['max_depth'] >= 5) :
+            max_iterations = 300; min_learning_rate = 1e-2
+        else :
+            max_iterations = 400; min_learning_rate = 5e-3
+            
+        param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, max_iterations)
+        param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)
+        param_dict['subsample'] = trial.suggest_float("subsample", 1e-2, 1.0, log = False)
+        param_dict['criterion'] = trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error'])
+        param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20])
+        param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
+        return param_dict
     
-#     return (GradientBoostingRegressor, gradBoostHParams)
+    return (GradientBoostingClassifier, gradBoostHParams)
 
 
-# def histgradientboost_loader(random_state):
+def histgradientboost_loader(random_state):
     
-#     from sklearn.ensemble import HistGradientBoostingRegressor
+    from sklearn.ensemble import HistGradientBoostingClassifier
     
-#     def histGradBoostHParams(trial):
-#         param_dict = {}
-#         param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error'])
-#         param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
-#         param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 500, log = True)
-#         param_dict['max_leaf_nodes'] = trial.suggest_int("max_leaf_nodes", 2, 100)
-#         param_dict['min_samples_leaf'] = trial.suggest_int("min_samples_leaf", 2, 200)
-#         param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1.0, log = True)
-#         param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20]) 
-#         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
-#         return param_dict
+    def histGradBoostHParams(trial):
+        param_dict = {}
+        # param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error'])
+        param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 20, log = False)
+        param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 500, log = True)
+        param_dict['max_leaf_nodes'] = trial.suggest_int("max_leaf_nodes", 2, 100)
+        param_dict['min_samples_leaf'] = trial.suggest_int("min_samples_leaf", 2, 200)
+        param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-4, 1.0, log = True)
+        param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20]) 
+        param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
+        return param_dict
     
-#     return (HistGradientBoostingRegressor, histGradBoostHParams)
+    return (HistGradientBoostingClassifier, histGradBoostHParams)
 
 
 # def knn_loader():

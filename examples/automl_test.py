@@ -24,7 +24,7 @@ regression = AutomatedRegression(
     nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
     overwrite=True,
-    write_folder = '/export/home/owen/Documents/test/',
+    write_folder = '/export/home/owen/Documents/test/regression/',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     list_regressors_optimise=['lightgbm'], #, 'xgboost', 'catboost']
@@ -52,13 +52,12 @@ classification = AutomatedClassification(
     # poly_value= 2,
     n_trial=10,
     overwrite=True,
-    
-    write_folder = '/export/home/owen/Documents/test/',
+    write_folder = '/export/home/owen/Documents/test/classification/',
     metric_optimise = accuracy_score,
     metric_assess = [lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')],
     optimisation_direction='maximize',
-    list_classifiers_optimise = ['catboost'],
-    list_classifiers_assess = ['lightgbm', 'xgboost', 'catboost'],
+    list_classifiers_optimise = ['histgradientboost'], #'lightgbm', 'xgboost', 'catboost'
+    list_classifiers_assess = ['histgradientboost'],
     boosted_early_stopping_rounds = 20,
     )
 
