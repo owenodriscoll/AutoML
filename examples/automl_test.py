@@ -15,13 +15,14 @@ df_y = pd.Series(y)
 test = AutomatedRegression(
     y=df_y,
     X=df_X,
-    pca_value=0.95,
-    spline_value= 2,
-    poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=10,
+    # pca_value=0.95,
+    # spline_value= 2,
+    # poly_value={'degree': 2, 'interaction_only': True},
+    n_trial=5,
     nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
-    overwrite=True,
+    write_folder = '/export/home/owen/Documents/scripts/AutoML/examples/auto_regression3/',
+    reload_study=False,
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     boosted_early_stopping_rounds = 20,
@@ -30,5 +31,6 @@ test = AutomatedRegression(
 
 test.apply()
 test.split_train_test()
+test.regression_hyperoptimise()
 
 
