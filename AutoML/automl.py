@@ -1,7 +1,7 @@
 from __future__ import annotations
 import optuna
 import joblib
-import os
+import os, sys
 import pickle
 import pandas as pd
 import numpy as np
@@ -28,6 +28,7 @@ from AutoML.AutoML.function_helper import FuncHelper
 # add option to overwrite study instead of only coninuing previous available studies
 # add option to not only relaod and add new trials, but to add new trials up to the previous specified n_trials
 #   e.g. if `n_trials` was 100 and all 100 were completed, dont add more trials with reload == True if n_trials <= 100
+# improve error messaging
 
 
 class AutomatedRegression:
@@ -273,8 +274,13 @@ class AutomatedRegression:
                     
                     # -- skip model if database already exists but reloading not permitted
                     if not self.reload_study:
-                        print(f"Study `regression_{regressor_name}` already exists but `reload_study == False` -- > " +
-                              "model skipped. \nSet `reload_study = True` to continue on existing study")
+                        message = [f"Study `regression_{regressor_name}` already exists but `reload_study == False` -- > " +
+                              "model skipped. \nSet `reload_study = True` to continue on existing study"]
+                        FuncHelper.function_warning_catcher(print, 
+                                                            message,
+                                                            new_warning_verbosity = 'default',
+                                                            old_warning_verbosity = 'ignore',
+                                                            new_std_error = sys.__stdout__)
                         continue
                     
                 else:
@@ -289,7 +295,16 @@ class AutomatedRegression:
                                             load_if_exists = self.reload_study)
 
                 study.optimize(_create_objective(study, create_params, regressor, regressor_name, dir_sampler),
-                                     n_trials=self.n_trial, timeout=self.timeout, catch=catch)
+                                      n_trials=self.n_trial, timeout=self.timeout, catch=catch)
+                
+                # FuncHelper.function_warning_catcher(study.optimize,
+                #                                     [_create_objective(study, 
+                #                                                         create_params, 
+                #                                                         regressor, 
+                #                                                         regressor_name, 
+                #                                                         dir_sampler),
+                #                                       self.n_trial, self.timeout, catch], 
+                #                                     self.warning_verbosity)
                 
                 
             return

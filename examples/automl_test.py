@@ -22,16 +22,16 @@ test = AutomatedRegression(
     n_trial=5,
     nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
-    write_folder='/export/home/owen/Documents/scripts/AutoML/examples/auto_regression5',
-    reload_study=True, 
+    write_folder='/export/home/owen/Documents/scripts/AutoML/examples/auto_regression6',
+    reload_study=False, 
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     boosted_early_stopping_rounds=20,
-    list_regressors_optimise=['lightgbm', 'xgboost', 'catboost']
+    list_regressors_optimise=['lightgbm', 'xgboost', 'catboost', 'lassolars']
     )
 
 test.apply()
 # test.split_train_test()
 # test.regression_hyperoptimise()
-
+# test.summary
 

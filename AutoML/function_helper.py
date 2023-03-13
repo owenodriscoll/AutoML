@@ -17,17 +17,17 @@ class FuncHelper:
             print("Input argument not of type: int, float or dict")
 
     @staticmethod
-    def function_warning_catcher(f, args, warning_verbosity):
-        warnings.simplefilter(warning_verbosity, UserWarning)
+    def function_warning_catcher(f, args, new_warning_verbosity, old_warning_verbosity = 'default', new_std_error = None):
+        warnings.simplefilter(new_warning_verbosity, UserWarning)
         old_stdout = sys.stdout
-        if warning_verbosity == 'ignore':
+        if new_warning_verbosity == 'ignore':
             sys.stdout = open(os.devnull, "w")
         else:
-            sys.stdout = old_stdout
+            sys.stdout = old_stdout if new_std_error is None else new_std_error
 
         out = FuncHelper.run_with_argument(f, args)
 
-        warnings.simplefilter('default', UserWarning)
+        warnings.simplefilter(old_warning_verbosity, UserWarning)
         sys.stdout = old_stdout
 
         return out
