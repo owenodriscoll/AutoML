@@ -26,6 +26,8 @@ from AutoML.AutoML.function_helper import FuncHelper
 # add warning to user if non int/flaot valeus detected in column, sugegst specifying column as ordinal or categorical
 # add conversion from arrays to Dataframe is the former is submitted
 # add option to overwrite study instead of only coninuing previous available studies
+# add option to not only relaod and add new trials, but to add new trials up to the previous specified n_trials
+#   e.g. if `n_trials` was 100 and all 100 were completed, dont add more trials with reload == True if n_trials <= 100
 
 
 class AutomatedRegression:
@@ -148,7 +150,7 @@ class AutomatedRegression:
         self.metric_optimise = metric_optimise
         self.metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess
         self.optimisation_direction = optimisation_direction
-        self.write_folder = write_folder
+        self.write_folder = write_folder + "/" if write_folder[-1] != "/" else write_folder
         self.reload_study = reload_study
         self.list_regressors_optimise = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'] if \
             list_regressors_optimise is None else list_regressors_optimise
@@ -226,7 +228,7 @@ class AutomatedRegression:
         return self
 
 
-    
+    @FuncHelper.method_warning_catcher
     def regression_hyperoptimise(self) -> AutomatedRegression:
         """
         Performs hyperparameter optimization on the regression models specified in `self.regressors_2_optimise` using Optuna.
@@ -266,7 +268,7 @@ class AutomatedRegression:
 
                 # -- check whether database already exists in which case should
                 # use previous instance of sampler. Not necessary for pruner (#!!! really?)
-                if os.path.exists(dir_study_db):
+                if os.path.exists(dir_sampler):
                     study_sampler = pickle.load(open(dir_sampler, "rb"))
                     
                     # -- skip model if database already exists but reloading not permitted
@@ -286,17 +288,14 @@ class AutomatedRegression:
                                             storage = dir_study_db_url, 
                                             load_if_exists = self.reload_study)
 
-                study.optimize(_create_objective(study, create_params, regressor, regressor_name),
+                study.optimize(_create_objective(study, create_params, regressor, regressor_name, dir_sampler),
                                      n_trials=self.n_trial, timeout=self.timeout, catch=catch)
                 
-                # -- save the sampler with pickle to be used in relaoded study
-                with open(dir_sampler, "wb") as sampler_state:
-                    pickle.dump(study.sampler, sampler_state)
                 
             return
 
-        @FuncHelper.method_warning_catcher
-        def _create_objective(study, create_params, regressor, regressor_name):
+        # @FuncHelper.method_warning_catcher
+        def _create_objective(study, create_params, regressor, regressor_name, dir_sampler):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
             the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
@@ -355,8 +354,14 @@ class AutomatedRegression:
                     ('pca', pca), 
                     ('model', transformed_regressor)
                     ])
+                
+                performance = _model_performance(trial, regressor_name, pipeline)
+                
+                # -- re-save the sampler after calculating each performance
+                with open(dir_sampler, "wb") as sampler_state:
+                    pickle.dump(study.sampler, sampler_state)
 
-                return _model_performance(trial, regressor_name, pipeline)
+                return performance
 
             return _objective
 
