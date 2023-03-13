@@ -15,17 +15,17 @@ df_y = pd.Series(y)
 test = AutomatedRegression(
     y=df_y,
     X=df_X,
-    pca_value=0.95,
-    spline_value= 2,
-    poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=10,
+    # pca_value=0.95,
+    # spline_value= 2,
+    # poly_value={'degree': 2, 'interaction_only': True},
+    n_trial=5,
     nominal_columns= ['nine'],
-    ordinal_columns= ['ten'],
+    # ordinal_columns= ['ten'],
     overwrite=True,
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     boosted_early_stopping_rounds = 20,
-    list_regressors_optimise=['lightgbm', 'xgboost', 'catboost']
+    list_regressors_optimise=['lightgbm']# , 'xgboost', 'catboost']
     )
 
 test.apply()

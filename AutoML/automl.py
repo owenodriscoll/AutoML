@@ -195,10 +195,29 @@ class AutomatedRegression:
         """
         
         # -- ensure input contains correct format
+        if type(self.y) == np.ndarray: self.y = pd.DataFrame(self.y)
+        if type(self.X) == np.ndarray: self.X = pd.DataFrame(self.X)
         if type(self.y) == pd.core.series.Series: self.y = self.y.to_frame()
         if type(self.X) == pd.core.series.Series: self.X = self.X.to_frame()
         self.y.columns = self.y.columns.astype(str)
         self.X.columns = self.X.columns.astype(str)
+        
+        # -- find if non-numeric columns match 
+        non_numeric_columns = (~self.X.applymap(np.isreal).any(0))
+        non_numeric_column_names = non_numeric_columns.index[non_numeric_columns].to_list()
+        
+        if type(self.nominal_columns) == type(self.ordinal_columns) == list:
+            submitted_non_numeric = set(self.nominal_columns + self.ordinal_columns)
+        elif type(self.nominal_columns) == type(self.ordinal_columns) == type(None):
+            submitted_non_numeric = set([])
+        elif type(self.nominal_columns) == type(None):
+            submitted_non_numeric = set(self.ordinal_columns)
+        elif type(self.ordinal_columns) == type(None):
+            submitted_non_numeric = set(self.nominal_columns)
+               
+        non_numeric_difference = list(set(non_numeric_column_names) ^ submitted_non_numeric)
+        if non_numeric_difference != []:
+            print(f"Possible ordinal or nominal columns not specified as either: {non_numeric_difference})")
         
         # -- split dataframes
         X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
