@@ -19,15 +19,17 @@ test = AutomatedRegression(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=5,
+    n_trial=20,
     nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
-    write_folder='/export/home/owen/Documents/scripts/AutoML/examples/auto_regression6',
+    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression0',
     reload_study=False, 
+    reload_trial_cap=False,
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     boosted_early_stopping_rounds=20,
-    list_regressors_optimise=['lightgbm', 'xgboost', 'catboost', 'lassolars']
+    list_regressors_optimise=['lightgbm', 'lassolars', 'bayesianridge'],
+    list_regressors_assess=['lightgbm', 'lassolars', 'bayesianridge'],
     )
 
 test.apply()

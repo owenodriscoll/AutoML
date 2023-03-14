@@ -24,8 +24,13 @@ class FuncHelper:
             sys.stdout = open(os.devnull, "w")
         else:
             sys.stdout = old_stdout if new_std_error is None else new_std_error
-
-        out = FuncHelper.run_with_argument(f, args)
+        
+        try:
+            out = FuncHelper.run_with_argument(f, args)
+        except:
+            warnings.simplefilter('default', UserWarning)
+            sys.stdout = old_stdout
+            raise Exception("Error in function warning catcher")
 
         warnings.simplefilter(old_warning_verbosity, UserWarning)
         sys.stdout = old_stdout
@@ -41,9 +46,14 @@ class FuncHelper:
                 sys.stdout = open(os.devnull, "w")
             else:
                 sys.stdout = old_stdout
-
-            f(args)
-
+                
+            try:
+                f(args)
+            except:
+                warnings.simplefilter('default', UserWarning)
+                sys.stdout = old_stdout
+                raise Exception("Error in method warning catcher")
+                
             warnings.simplefilter('default', UserWarning)
             sys.stdout = old_stdout
 
