@@ -17,23 +17,24 @@ class FuncHelper:
             print("Input argument not of type: int, float or dict")
 
     @staticmethod
-    def function_warning_catcher(f, args, warning_verbosity):
-        warnings.simplefilter(warning_verbosity, UserWarning)
+    def function_warning_catcher(f, args, new_warning_verbosity, old_warning_verbosity = 'default', new_std_error = None):
+        warnings.simplefilter(new_warning_verbosity, UserWarning)
         old_stdout = sys.stdout
-        if warning_verbosity == 'ignore':
+        if new_warning_verbosity == 'ignore':
             sys.stdout = open(os.devnull, "w")
         else:
-            sys.stdout = old_stdout
+            sys.stdout = old_stdout if new_std_error is None else new_std_error
 
-        # -- add in try loop such that warnings are reset to original even 
+        # -- add in try loop such that warnings are reset to original even
         # if errors occur in function
         try:
             out = FuncHelper.run_with_argument(f, args)
         except:
             warnings.simplefilter('default', UserWarning)
             sys.stdout = old_stdout
-        
-        warnings.simplefilter('default', UserWarning)
+            raise Exception("Error in function warning catcher")
+
+        warnings.simplefilter(old_warning_verbosity, UserWarning)
         sys.stdout = old_stdout
 
         return out
@@ -47,15 +48,16 @@ class FuncHelper:
                 sys.stdout = open(os.devnull, "w")
             else:
                 sys.stdout = old_stdout
-            
-            # -- add in try loop such that warnings are reset to original even 
+
+            # -- add in try loop such that warnings are reset to original even
             # if errors occur in function
             try:
                 f(args)
             except:
                 warnings.simplefilter('default', UserWarning)
                 sys.stdout = old_stdout
-            
+                raise Exception("Error in method warning catcher")
+
             warnings.simplefilter('default', UserWarning)
             sys.stdout = old_stdout
 

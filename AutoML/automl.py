@@ -1,10 +1,12 @@
 from __future__ import annotations
 import optuna
 import joblib
-import os
+import os, sys
+import pickle
 import pandas as pd
 import numpy as np
 from typing import Callable, Union, List
+from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 from sklearn.metrics import median_absolute_error, r2_score
 from sklearn.model_selection import KFold
@@ -19,11 +21,12 @@ from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineCh
 from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
-# include categorical feature support
 # try polynomial features with interactions_only = True, include_bias = False
 # add warning to user if non int/flaot valeus detected in column, suggest specifying column as ordinal or categorical
 #     warning hidden after apply, possible that print statement is hidden?
 # add conversion from arrays to Dataframe is the former is submitted
+# add option to overwrite study instead of only coninuing previous available studies
+# improve error messaging
 
 
 class AutomatedRegression:
@@ -43,7 +46,8 @@ class AutomatedRegression:
                  metric_assess: List[Callable] = None,
                  optimisation_direction: str = 'minimize',
                  write_folder: str = os.getcwd() + '/auto_regression/',
-                 overwrite: bool = False,
+                 reload_study: bool = False,
+                 reload_trial_cap: bool = False,
                  list_regressors_optimise: List[str] = None,
                  list_regressors_assess: List[str] = None,
                  boosted_early_stopping_rounds: int = 20,
@@ -51,7 +55,8 @@ class AutomatedRegression:
                  ordinal_columns: Union[List[str], type(None)] = None,
                  fit_frac: List[float] = None,
                  random_state: Union[int, type(None)] = 42,
-                 warning_verbosity: str = 'ignore'):
+                 warning_verbosity: str = 'ignore'
+                 ):
         """
         A class for automated regression, which optimizes hyperparameters and select best performing regressor(s).
 
@@ -87,8 +92,11 @@ class AutomatedRegression:
             The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
         write_folder: str, optional (default='/auto_regression/' in the current working directory)
             The folder where to write the results and models.
-        overwrite: bool, optional (default=False)
-            Whether to overwrite the existing files in the write_folder.
+        reload_study: bool, optional (default=True)
+            Whether to continue study if previous study exists in write_folder.
+        total_trial_cap:
+            Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded 
+            study already performed 40 trials, the new study will at most perform 10 additional trials
         list_regressors_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
             The list of names of regressors to optimize, options: 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 
             'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
@@ -146,8 +154,9 @@ class AutomatedRegression:
         self.metric_optimise = metric_optimise
         self.metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess
         self.optimisation_direction = optimisation_direction
-        self.write_folder = write_folder
-        self.overwrite = overwrite
+        self.write_folder = write_folder + "/" if write_folder[-1] != "/" else write_folder
+        self.reload_study = reload_study
+        self.reload_trial_cap = reload_trial_cap
         self.list_regressors_optimise = ['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'] if \
             list_regressors_optimise is None else list_regressors_optimise
         self.list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
@@ -176,10 +185,19 @@ class AutomatedRegression:
         self.create_dir()
         self.split_train_test()
 
+
     def create_dir(self):
+        self.write_folder_sampler = self.write_folder+"samplers/"
+        
+        # -- create storage folder for database files and regression models
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
+            
+        # -- create storage sub folder for specific samplers in case want to restart
+        if not os.path.exists(self.write_folder_sampler):
+            os.makedirs(self.write_folder_sampler)
         return self
+
 
     def split_train_test(self, shuffle: bool = True):
         """
@@ -268,31 +286,59 @@ class AutomatedRegression:
                 catch = ( )
 
             for regressor_name, (regressor, create_params) in self.regressors_2_optimise.items():
-                study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
-                                            pruner=self.pruner)
+                
+                # -- create SQL database to store study results
+                dir_study_db = f"{self.write_folder}{regressor_name}.db"
+                dir_study_db_url = f"sqlite:///{dir_study_db}"
+                dir_sampler = f"{self.write_folder_sampler}{regressor_name}_sampler.pkl"
 
-                write_file = self.write_folder + regressor_name + '.pkl'
+                # -- check whether database already exists in which case should ...
+                # ... use previous instance of sampler. Not necessary for pruner (#!!! really?)
+                if os.path.exists(dir_sampler):
+                    study_sampler = pickle.load(open(dir_sampler, "rb"))
+                    
+                    # -- skip model if database already exists but reloading not permitted
+                    if not self.reload_study:
+                        message = [f"Study `regression_{regressor_name}` already exists but `reload_study == False` -- > " +
+                              "model skipped. \nSet `reload_study = True` to continue on existing study."]
 
-                # -- if regressor already trained, throw warning unless overwrite  == True
-                if os.path.isfile(write_file):
-                    if not self.overwrite:
-                        message = "Regressor already exists in directory but overwrite set to 'False'. Regressor skipped."
-                        print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
+                        # -- temporarily revert printing permission to notify of skipped model 
+                        FuncHelper.function_warning_catcher(
+                            lambda x: print(x, flush=True), # flush = True prevents buffering of print statement
+                            message,
+                            new_warning_verbosity = 'default',
+                            old_warning_verbosity = 'ignore',
+                            new_std_error = sys.__stdout__
+                            )
                         continue
-                    if self.overwrite:
-                        message = "Regressor already exists in directory. Overwrite set to 'TRUE'"
-                        print(len(message) * '_' + '\n' + message + '\n' + len(message) * '_')
-
-                study.optimize(_create_objective(study, create_params, regressor, regressor_name, write_file),
-                                     n_trials=self.n_trial, timeout=self.timeout, catch=catch)
-
-                # -- save final study iteration
-                joblib.dump(study, write_file)
+                    
+                else:
+                    study_sampler = self.sampler
+                    create_engine(dir_study_db_url)
+                    
+                # -- create study or reload previous
+                study = optuna.create_study(study_name=f"regression_{regressor_name}", 
+                                            direction=self.optimisation_direction, 
+                                            sampler=study_sampler,
+                                            pruner=self.pruner, 
+                                            storage = dir_study_db_url, 
+                                            load_if_exists = self.reload_study)
+                
+                # -- prevent running more trials than cap
+                if (self.reload_study) & (self.reload_trial_cap):
+                    n_trials = self.n_trial - len(study.trials)
+                    if n_trials <= 0: 
+                        continue
+                else:
+                    n_trials = self.n_trial
+                    
+                study.optimize(_create_objective(study, create_params, regressor, regressor_name, dir_sampler),
+                                      n_trials=n_trials, timeout=self.timeout, catch=catch)
                 
             return
 
 
-        def _create_objective(study, create_params, regressor, regressor_name, write_file):
+        def _create_objective(study, create_params, regressor, regressor_name, dir_sampler):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
             the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
@@ -302,9 +348,6 @@ class AutomatedRegression:
             """
 
             def _objective(trial):
-                # save optuna study
-                joblib.dump(study, write_file)
-
                 # -- Instantiate scaler for independents
                 scaler = ScalerChooser(trial=trial).suggest_fit()
 
@@ -354,8 +397,14 @@ class AutomatedRegression:
                     ('pca', pca), 
                     ('model', transformed_regressor)
                     ])
+                
+                performance = _model_performance(trial, regressor_name, pipeline)
+                
+                # -- re-save the sampler after calculating each performance
+                with open(dir_sampler, "wb") as sampler_state:
+                    pickle.dump(study.sampler, sampler_state)
 
-                return _model_performance(trial, regressor_name, pipeline)
+                return performance
 
             return _objective
 
@@ -413,7 +462,7 @@ class AutomatedRegression:
                         set([regressor_name]) & set(['lightgbm', 'xgboost', 'catboost']))  
 
                     if early_stopping_permitted:
-                        # During early stopping we assess the training performance of the model per round
+                        # -- During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during 
                         # the last step of the pipeline. Therefore we must first apply all previous 
                         # transformations on the test fold. To accomplish this we first fit all the
@@ -502,7 +551,13 @@ class AutomatedRegression:
 
         estimators = []
         for regressor_name in self.list_regressors_assess:
-            study = joblib.load(self.write_folder + regressor_name + '.pkl')
+            
+            # -- reload relevant study. Sampler not reloaded here as no additional studies are performed 
+            study = optuna.create_study(    
+                study_name=f"regression_{regressor_name}", 
+                direction=self.optimisation_direction,
+                storage=f"sqlite:///{self.write_folder}{regressor_name}.db", 
+                load_if_exists=True)
             
             # -- select parameters corresponding to regressor 
             list_params = list(study.best_params)
@@ -525,7 +580,6 @@ class AutomatedRegression:
                 transformer=transformer
             )
             
-
             pipe_single_study = Pipeline([
                 ('categorical', categorical),
                 ('poly', poly),
@@ -583,24 +637,20 @@ class AutomatedRegression:
                 # -- predict on the whole testing dataset
                 self.y_pred = regressor_final.predict(self.X_test)
 
-                # -- store stacked regressor, if file does exist, double check whether the user wants to overwrite
+                # -- store stacked regressor, if file already exists, confirm overwrite
                 write_file_stacked_regressor = self.write_folder + "stacked_regressor.joblib"
+                
                 if os.path.isfile(write_file_stacked_regressor):
-                    if not self.overwrite:
-                        question = "Stacked Regressor already exists in directory but overwrite set to 'False'. " \
-                                   "Overwrite anyway ? (y/n):"
-                        user_input =  input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
-                        if user_input != 'y':
-                            response = "Stacked regressor not saved"
-                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
-                    if self.overwrite:
-                        question = "Stacked Regressor already exists in directory. Overwrite set to 'TRUE'. Are you " \
-                                  "certain ? (y/n):"
-                        user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
-                        if user_input != 'n':
-                            response = "Stacked Regressor overwritten"
-                            print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
-                            joblib.dump(regressor_final, write_file_stacked_regressor)
+                    question = "Stacked Regressor already exists in directory. Overwrite ? (y/n):"
+                    user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
+                    
+                    if user_input != 'n':
+                        response = "Stacked Regressor overwritten"
+                        joblib.dump(regressor_final, write_file_stacked_regressor)
+                    else:
+                        response = "Stacked regressor not saved"
+                        
+                    print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
 
                 # -- if file doesn't exist, write it
                 if not os.path.isfile(write_file_stacked_regressor):

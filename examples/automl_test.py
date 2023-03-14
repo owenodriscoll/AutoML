@@ -18,22 +18,24 @@ df_y = pd.Series(y)
 test = AutomatedRegression(
     y=df_y,
     X=df_X,
-    # pca_value=0.95,
-    # spline_value= 2,
-    # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=5,
-    # nominal_columns= ['nine'],
+    pca_value=0.95,
+    spline_value=2,
+    poly_value={'degree': 2, 'interaction_only': True},
+    n_trial=10,
+    nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
-    write_folder = "automl_test",
-    overwrite=True,
+    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression0',
+    reload_study=False,
+    reload_trial_cap=False,
     metric_optimise=r2_score,
     optimisation_direction='maximize',
-    boosted_early_stopping_rounds = 20,
-    list_regressors_optimise=['lightgbm']# , 'xgboost', 'catboost']
+    boosted_early_stopping_rounds=20,
+    list_regressors_optimise=['lightgbm', 'lassolars', 'bayesianridge'],
+    list_regressors_assess=['lightgbm', 'lassolars', 'bayesianridge'],
     )
 
-# test.apply()
+test.apply()
 # test.split_train_test()
-test.regression_hyperoptimise()
-
+# test.regression_hyperoptimise()
+# test.summary
 
