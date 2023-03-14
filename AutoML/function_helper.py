@@ -25,8 +25,14 @@ class FuncHelper:
         else:
             sys.stdout = old_stdout
 
-        out = FuncHelper.run_with_argument(f, args)
-
+        # -- add in try loop such that warnings are reset to original even 
+        # if errors occur in function
+        try:
+            out = FuncHelper.run_with_argument(f, args)
+        except:
+            warnings.simplefilter('default', UserWarning)
+            sys.stdout = old_stdout
+        
         warnings.simplefilter('default', UserWarning)
         sys.stdout = old_stdout
 
@@ -41,9 +47,15 @@ class FuncHelper:
                 sys.stdout = open(os.devnull, "w")
             else:
                 sys.stdout = old_stdout
-
-            f(args)
-
+            
+            # -- add in try loop such that warnings are reset to original even 
+            # if errors occur in function
+            try:
+                f(args)
+            except:
+                warnings.simplefilter('default', UserWarning)
+                sys.stdout = old_stdout
+            
             warnings.simplefilter('default', UserWarning)
             sys.stdout = old_stdout
 

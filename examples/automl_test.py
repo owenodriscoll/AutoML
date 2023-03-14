@@ -3,6 +3,9 @@ from sklearn.datasets import make_regression
 from sklearn.metrics import r2_score
 from AutoML.AutoML import AutomatedRegression
 
+# %reset -f
+
+#%%
 X, y = make_regression(n_samples=1000, n_features=10, n_informative=2, random_state=42)
 
 df_X = pd.DataFrame(X)
@@ -19,7 +22,7 @@ test = AutomatedRegression(
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
     n_trial=5,
-    nominal_columns= ['nine'],
+    # nominal_columns= ['nine'],
     ordinal_columns= ['ten'],
     write_folder = "automl_test",
     overwrite=True,

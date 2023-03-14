@@ -162,9 +162,7 @@ class AutomatedRegression:
                                                       random_state=self.random_state)
         self.boosted_early_stopping_rounds = boosted_early_stopping_rounds
         self.warning_verbosity = warning_verbosity
-        self.create_dir()
-        self.split_train_test()
-
+        
         self.X_train = None
         self.X_test = None
         self.y_train = None
@@ -174,6 +172,9 @@ class AutomatedRegression:
         self.estimators = None
         self.y_pred = None
         self.summary = None
+        
+        self.create_dir()
+        self.split_train_test()
 
     def create_dir(self):
         if not os.path.exists(self.write_folder):
