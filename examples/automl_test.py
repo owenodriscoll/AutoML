@@ -20,7 +20,8 @@ test = AutomatedRegression(
     # poly_value={'degree': 2, 'interaction_only': True},
     n_trial=5,
     nominal_columns= ['nine'],
-    # ordinal_columns= ['ten'],
+    ordinal_columns= ['ten'],
+    write_folder = "automl_test",
     overwrite=True,
     metric_optimise=r2_score,
     optimisation_direction='maximize',
@@ -28,7 +29,8 @@ test = AutomatedRegression(
     list_regressors_optimise=['lightgbm']# , 'xgboost', 'catboost']
     )
 
-test.apply()
-test.split_train_test()
+# test.apply()
+# test.split_train_test()
+test.regression_hyperoptimise()
 
 

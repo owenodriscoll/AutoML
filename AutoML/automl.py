@@ -21,7 +21,8 @@ from AutoML.AutoML.function_helper import FuncHelper
 
 # include categorical feature support
 # try polynomial features with interactions_only = True, include_bias = False
-# add warning to user if non int/flaot valeus detected in column, sugegst specifying column as ordinal or categorical
+# add warning to user if non int/flaot valeus detected in column, suggest specifying column as ordinal or categorical
+#     warning hidden after apply, possible that print statement is hidden?
 # add conversion from arrays to Dataframe is the former is submitted
 
 
@@ -162,6 +163,7 @@ class AutomatedRegression:
         self.boosted_early_stopping_rounds = boosted_early_stopping_rounds
         self.warning_verbosity = warning_verbosity
         self.create_dir()
+        self.split_train_test()
 
         self.X_train = None
         self.X_test = None
@@ -202,7 +204,7 @@ class AutomatedRegression:
         self.y.columns = self.y.columns.astype(str)
         self.X.columns = self.X.columns.astype(str)
         
-        # -- find if non-numeric columns match 
+        # -- find and warn if non-numeric columns match 
         non_numeric_columns = (~self.X.applymap(np.isreal).any(0))
         non_numeric_column_names = non_numeric_columns.index[non_numeric_columns].to_list()
         
@@ -635,7 +637,7 @@ class AutomatedRegression:
         return self
 
     def apply(self):
-        self.split_train_test()
+        # self.split_train_test()
         self.regression_hyperoptimise()
         self.regression_select_best()
         self.regression_evaluate()
