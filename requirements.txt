@@ -6,3 +6,4 @@ optuna
 sklearn
 numpy
 pandas
+SQLAlchemy
