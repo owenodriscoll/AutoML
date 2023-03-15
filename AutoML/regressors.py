@@ -27,8 +27,12 @@ def regressor_selector(regressor_names, random_state = None):
     regressors = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 'gradientboost', 'histgradientboost',
                   'knn', 'sgd', 'bagging', 'svr', 'elasticnet']
     selected_regressors = list(set(regressor_names) & set(regressors))
+    invalid_regressors = list(set(regressor_names).difference(set(regressors)))
+    
     if selected_regressors == []:
-        return print('no valid regressor names provided')
+        return print('No valid regressor names provided')
+    if invalid_regressors != []:
+        return print(f"Invalid regressor(s) supplied: {invalid_regressors}. Skipped")
     
     # -- only load the regressor and import relevant package if provided regressor is in the list of pre-defined regressors
     regressor_dict = {}
@@ -50,7 +54,11 @@ def regressor_selector(regressor_names, random_state = None):
     # -- remove dictionary elements where regressor was not loaded
     regressor_dict_none_rem = {k: v for k, v in regressor_dict.items() if v is not None}
     
-    return regressor_dict_none_rem
+    # -- sort dictionary to the same order as the input regressors
+    index_map = {v: i for i, v in enumerate(regressor_names)}
+    regressor_dict_none_rem_sorted = dict(sorted(regressor_dict_none_rem.items(), key=lambda pair: index_map[pair[0]]))
+    
+    return regressor_dict_none_rem_sorted
     
 
         
