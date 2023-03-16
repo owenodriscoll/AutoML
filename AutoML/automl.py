@@ -3,6 +3,7 @@ import optuna
 import joblib
 import os, sys
 import pickle
+import random
 import pandas as pd
 import numpy as np
 from typing import Callable, Union, List
@@ -22,10 +23,8 @@ from AutoML.AutoML.regressors import regressor_selector
 from AutoML.AutoML.function_helper import FuncHelper
 
 # try polynomial features with interactions_only = True, include_bias = False
-# add warning to user if non int/flaot valeus detected in column, suggest specifying column as ordinal or categorical
-#     warning hidden after apply, possible that print statement is hidden?
-# add conversion from arrays to Dataframe is the former is submitted
 # add option to overwrite study instead of only coninuing previous available studies
+# add time constraint to reloading
 # improve error messaging
 
 
@@ -50,6 +49,7 @@ class AutomatedRegression:
                  reload_trial_cap: bool = False,
                  list_regressors_optimise: List[str] = None,
                  list_regressors_assess: List[str] = None,
+                 n_weak_models: int = 0,
                  boosted_early_stopping_rounds: int = 20,
                  nominal_columns: Union[List[str], type(None)] = None,
                  ordinal_columns: Union[List[str], type(None)] = None,
@@ -94,7 +94,7 @@ class AutomatedRegression:
             The folder where to write the results and models.
         reload_study: bool, optional (default=True)
             Whether to continue study if previous study exists in write_folder.
-        total_trial_cap:
+        reload_trial_cap:
             Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded 
             study already performed 40 trials, the new study will at most perform 10 additional trials
         list_regressors_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
@@ -102,8 +102,17 @@ class AutomatedRegression:
             'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
         list_regressors_assess: list of str, optional (default=None)
             The list of names of regressors to assess. If None, uses the same as `list_regressors_optimise`.
+        n_weak_models:
+            Number of models to train stacked regressor on in addition to best model. For each specified
+            model the best performing and randomly selected n_weak_models models are used for stacking.
+            E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
+            in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
+            to include (unique) additional information from the additional models, despite them performing worse 
+            independly than the best model
         boosted_early_stopping_rounds:
-            !!!! NOT FOR GRADIENT AND HISTGRADIENTBOOST! only for non sklearn regressors
+            Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
+            less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
+            per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
         nominal_columns:
             !!!!
         ordinal_columns:
@@ -128,9 +137,9 @@ class AutomatedRegression:
             attribute and store them in the estimators attribute of the class instance.
 
         regression_evaluate:
-
+            !!!
         apply:
-            applies in correct order the 'split_train_test', 'regression_hyperoptimise', 'regression_select_best' and
+            applies in correct order 'regression_hyperoptimise', 'regression_select_models' and
             'regression_evaluate' methods.
 
         Returns
@@ -161,6 +170,7 @@ class AutomatedRegression:
             list_regressors_optimise is None else list_regressors_optimise
         self.list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
             list_regressors_assess
+        self.n_weak_models = n_weak_models
         self.nominal_columns = nominal_columns
         self.ordinal_columns = ordinal_columns
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if fit_frac is None else fit_frac
@@ -532,8 +542,9 @@ class AutomatedRegression:
             _optimise()
             
             return self
-
-    def regression_select_best(self) -> AutomatedRegression:
+    
+    
+    def regression_select_models(self, random_state_model_selection = None) -> AutomatedRegression:
         """
         This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
         attribute and store them in the estimators attribute of the class instance.
@@ -548,7 +559,14 @@ class AutomatedRegression:
         -------
         class instance.
         """
-
+        
+        # -- set randomness parameters for randomly selecting models (if self.n_weak_models > 0)
+        if random_state_model_selection == []: 
+            random_state_model_selection = self.random_state
+       
+        random.seed(random_state_model_selection)
+    
+        # -- prepare all estimators for stacking
         estimators = []
         for regressor_name in self.list_regressors_assess:
             
@@ -564,35 +582,69 @@ class AutomatedRegression:
             list_params_not_regressor = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
                                          'transformers', 'n_quantiles']
             list_params_regressor = set(list_params).difference(set(list_params_not_regressor))
-            parameter_dict = {k: study.best_params[k] for k in study.best_params.keys() & set(list_params_regressor)}
             
+            # -- select all trials associated with model
+            df_trials = study.trials_dataframe() 
+            df_trials_non_pruned = df_trials[df_trials.state == 'COMPLETE']
             
-            # -- select all the pipeline steps corresponding to input settings or best trial
-            categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
-            spline = SplineChooser(spline_value=study.best_params.get('spline_value')).fit()
-            poly = PolyChooser(poly_value=study.best_params.get('poly_value')).fit()
-            pca = PcaChooser(pca_value=study.best_params.get('pca_value')).fit()
-            scaler = ScalerChooser(arg=study.best_params.get('scaler')).string_to_func()
-            transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
-            transformed_regressor = TransformedTargetRegressor(
-                # index 0 is the regressor, index 1 is hyper-optimization function
-                regressor=self.regressors_2_assess[regressor_name][0](**parameter_dict),
-                transformer=transformer
-            )
+            # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
+            if self.n_weak_models > len(df_trials_non_pruned) -1:
+                
+                message = [f"Number of unique weak models less than requested number of weak models: " + 
+                           "{len(df_trials_non_pruned) -1} < {self.n_weak_models} \n" +
+                           "n_weak_models set to total number of weak models instead."]
+                print(message[0], flush=True)
+                
+                self.n_weak_models = len(df_trials_non_pruned) -1
             
-            pipe_single_study = Pipeline([
-                ('categorical', categorical),
-                ('poly', poly),
-                ('spline', spline),
-                ('scaler', scaler),
-                ('pca', pca),
-                ('model', transformed_regressor)]
-            )
-            estimators.append((regressor_name, pipe_single_study))
+            # -- select best
+            if self.optimisation_direction == 'maximize':
+                idx_best = df_trials_non_pruned.index[df_trials_non_pruned.value.argmax()]
+            elif self.optimisation_direction == 'minimize':
+                idx_best = df_trials_non_pruned.index[df_trials_non_pruned.value.argmin()]
+                
+            # -- add additional models 
+            idx_remaining = df_trials_non_pruned.number.values.tolist()
+            idx_remaining.remove(idx_best)
+            idx_models = [idx_best] + random.sample(idx_remaining, self.n_weak_models) 
+            
+            # -- name best and weaker models
+            weak_model_insert = [regressor_name+'_best']  + [regressor_name+'_'+str(i) for i in idx_models[1:]]
+            
+            # -- create estimator for best and additional weaker models
+            for i, idx_model in enumerate(idx_models):
+                
+                model_params = study.trials[idx_model].params
+                parameter_dict = {k: model_params[k] for k in model_params.keys() & set(list_params_regressor)}
+                
+                # -- select all the pipeline steps corresponding to input settings or best trial
+                categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
+                spline = SplineChooser(spline_value=model_params.get('spline_value')).fit()
+                poly = PolyChooser(poly_value=model_params.get('poly_value')).fit()
+                pca = PcaChooser(pca_value=model_params.get('pca_value')).fit()
+                scaler = ScalerChooser(arg=model_params.get('scaler')).string_to_func()
+                transformer = TransformerChooser(model_params.get('n_quantiles'), self.random_state).fit()
+                transformed_regressor = TransformedTargetRegressor(
+                    # index 0 is the regressor, index 1 is hyper-optimization function
+                    regressor=self.regressors_2_assess[regressor_name][0](**parameter_dict),
+                    transformer=transformer
+                )
+                
+                pipe_single_study = Pipeline([
+                    ('categorical', categorical),
+                    ('poly', poly),
+                    ('spline', spline),
+                    ('scaler', scaler),
+                    ('pca', pca),
+                    ('model', transformed_regressor)]
+                )
+                estimators.append((weak_model_insert[i], pipe_single_study))
             
         self.estimators = estimators
+        self.list_all_models_assess = [estimator[0] for estimator in estimators]
 
         return self
+    
 
     def regression_evaluate(self) -> AutomatedRegression:
         """
@@ -615,7 +667,7 @@ class AutomatedRegression:
         indexes_test_cv = list(self.cross_validation.split(self.X_test))
 
         # -- determine names of regressors to assess
-        regressors_to_assess = self.list_regressors_assess + ['stacked']
+        regressors_to_assess = self.list_all_models_assess + ['stacked']
 
         # -- create an empty dictionary to populate with performance while looping over regressors
         summary = dict([(regressor, list()) for regressor in regressors_to_assess])
@@ -688,9 +740,8 @@ class AutomatedRegression:
         return self
 
     def apply(self):
-        # self.split_train_test()
         self.regression_hyperoptimise()
-        self.regression_select_best()
+        self.regression_select_models()
         self.regression_evaluate()
         
         return self
