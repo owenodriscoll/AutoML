@@ -595,7 +595,7 @@ class AutomatedRegression:
                            "n_weak_models set to total number of weak models instead."]
                 print(message[0], flush=True)
                 
-                self.n_weak_models = len(df_trials_non_pruned) -1
+                n_weak_models = len(df_trials_non_pruned) -1
             
             # -- select best
             if self.optimisation_direction == 'maximize':
@@ -606,7 +606,7 @@ class AutomatedRegression:
             # -- add additional models 
             idx_remaining = df_trials_non_pruned.number.values.tolist()
             idx_remaining.remove(idx_best)
-            idx_models = [idx_best] + random.sample(idx_remaining, self.n_weak_models) 
+            idx_models = [idx_best] + random.sample(idx_remaining, n_weak_models) 
             
             # -- name best and weaker models
             weak_model_insert = [regressor_name+'_best']  + [regressor_name+'_'+str(i) for i in idx_models[1:]]
