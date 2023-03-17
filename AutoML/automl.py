@@ -559,16 +559,15 @@ class AutomatedRegression:
         -------
         class instance.
         """
-        
-        # -- set randomness parameters for randomly selecting models (if self.n_weak_models > 0)
-        if random_state_model_selection == []: 
-            random_state_model_selection = self.random_state
-       
-        random.seed(random_state_model_selection)
     
         # -- prepare all estimators for stacking
         estimators = []
         for regressor_name in self.list_regressors_assess:
+            
+            # -- set randomness parameters for randomly selecting models (if self.n_weak_models > 0)
+            if type(random_state_model_selection) == type(None): 
+                random_state_model_selection = self.random_state
+            random.seed(random_state_model_selection)
             
             # -- reload relevant study. Sampler not reloaded here as no additional studies are performed 
             study = optuna.create_study(    
@@ -591,8 +590,8 @@ class AutomatedRegression:
             n_weak_models = self.n_weak_models
             if self.n_weak_models > len(df_trials_non_pruned) -1:
                 
-                message = [f"Number of unique weak models less than requested number of weak models: " + 
-                           "{len(df_trials_non_pruned) -1} < {self.n_weak_models} \n" +
+                message = ["Number of unique weak models less than requested number of weak models: " + 
+                           f"{len(df_trials_non_pruned) -1} < {self.n_weak_models} \n" +
                            "n_weak_models set to total number of weak models instead."]
                 print(message[0], flush=True)
                 
