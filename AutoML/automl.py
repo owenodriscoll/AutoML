@@ -588,6 +588,7 @@ class AutomatedRegression:
             df_trials_non_pruned = df_trials[df_trials.state == 'COMPLETE']
             
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
+            n_weak_models = self.n_weak_models
             if self.n_weak_models > len(df_trials_non_pruned) -1:
                 
                 message = [f"Number of unique weak models less than requested number of weak models: " + 
