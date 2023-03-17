@@ -17,7 +17,7 @@ from sklearn.preprocessing import OrdinalEncoder
 from sklearn.compose import ColumnTransformer
 
 from typing import Union
-from AutoML.AutoML.function_helper import FuncHelper
+from .function_helper import FuncHelper
 
 
 def decorator_report(variable, to_return_self: bool = False):

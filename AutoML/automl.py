@@ -17,10 +17,10 @@ from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import train_test_split
 
-from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
+from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser
-from AutoML.AutoML.regressors import regressor_selector
-from AutoML.AutoML.function_helper import FuncHelper
+from .regressors import regressor_selector
+from .function_helper import FuncHelper
 
 # try polynomial features with interactions_only = True, include_bias = False
 # add option to overwrite study instead of only coninuing previous available studies
