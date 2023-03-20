@@ -4,9 +4,9 @@ import joblib
 import os
 import pandas as pd
 import numpy as np
-from typing import Callable, Union, List
+from dataclasses import dataclass
+from typing import Callable, Union, List, Dict, Any
 from optuna.samplers import TPESampler
-from sklearn.metrics import median_absolute_error, r2_score, accuracy_score, precision_score
 from sklearn.model_selection import KFold
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import Pipeline
@@ -14,11 +14,9 @@ from sklearn.ensemble import StackingRegressor, StackingClassifier
 from sklearn.linear_model import Ridge, RidgeClassifier
 from sklearn.model_selection import train_test_split
 
-from AutoML.AutoML.scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
+from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser
-from AutoML.AutoML.regressors import regressor_selector
-from AutoML.AutoML.classifiers import classifier_selector
-from AutoML.AutoML.function_helper import FuncHelper
+from .function_helper import FuncHelper
 
 # try polynomial features with interactions_only = True, include_bias = False
 # add warning to user if non int/flaot valeus detected in column, sugegst specifying column as ordinal or categorical
@@ -27,158 +25,149 @@ from AutoML.AutoML.function_helper import FuncHelper
 # several classification models accept class weights, implement class weight support
 # maybe train several weak models (for instance multiple constrained catboosts, xgboosts etc), and then stack
 
+@dataclass
 class AutomatedML:
-    def __init__(self,
-                 y: pd.DataFrame,
-                 X: pd.DataFrame,
-                 test_frac: float = 0.2,
-                 timeout: int = 600,
-                 n_trial: int = 100,
-                 cross_validation: callable = None,
-                 sampler: callable = None,
-                 pruner: callable = None,
-                 poly_value: Union[int, float, dict, type(None)] = None,
-                 spline_value: Union[int, float, dict, type(None)] = None,
-                 pca_value: Union[int, float, dict, type(None)] = None,
-                 metric_optimise: Callable = None,
-                 metric_assess: List[Callable] = None,
-                 list_model_optimise: List[str] = None,
-                 list_model_assess: List[str] = None,
-                 model_optimise: List[Callable] = None,
-                 model_assess: List[Callable] = None,
-                 optimisation_direction: str = 'minimize',
-                 write_folder: str = os.getcwd() + '/auto_regression/',
-                 overwrite: bool = False,
-                 boosted_early_stopping_rounds: int = 20,
-                 nominal_columns: Union[List[str], type(None)] = None,
-                 ordinal_columns: Union[List[str], type(None)] = None,
-                 fit_frac: List[float] = None,
-                 random_state: Union[int, type(None)] = 42,
-                 warning_verbosity: str = 'ignore',
-                 ml_objective: str = None):
-        """
-        A class for automated regression, which optimizes hyperparameters and select best performing regressor(s).
+    """
+    A class for automated machine learning, which optimizes hyperparameters and select best performing model(s).
 
-        Parameters:
-        -----------
-        y: pandas.DataFrame
-            Target values of shape (n_samples, 1).
-        X: pandas.DataFrame
-            Features of shape (n_samples, n_features).
-        test_frac: float, optional (default=0.2)
-            Fraction of the data to use as test data.
-        timeout: int, optional (default=600)
-            Timeout in seconds for optimization of hyperparameters.
-        n_trial: int, optional (default=100)
-            Number of trials for optimization of hyperparameters.
-        cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
-            The cross-validation object to use for evaluation of models.
-        sampler: callable, optional (default=TPESampler with seed=random_state)
-            The sampler object to use for optimization of hyperparameters.
-        pruner: callable, optional (default=HyperbandPruner with min_resource=1, max_resource='auto', reduction_factor=3)
-            The pruner object to use for optimization of hyperparameters.
-        poly_value: int, float, dict, optional (default=None)
-            The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
-        spline_value: int, float, dict, optional (default=None)
-            The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or or 5
-        pca_value: int, float, dict, optional (default=None). 
-            The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
-        metric_optimise: callable, optional (default=median_absolute_error)
-            The metric to use for optimization of hyperparameters.
-        metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
-            The metrics to use for assessment of models.
-        optimisation_direction: str, optional (default='minimize')
-            The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
-        write_folder: str, optional (default='/auto_regression/' in the current working directory)
-            The folder where to write the results and models.
-        overwrite: bool, optional (default=False)
-            Whether to overwrite the existing files in the write_folder.
-        list_model_optimise: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
-            The list of names of models to optimize, options: 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars',
-            'adaboost', 'gradientboost','knn', 'sgd', 'bagging', 'svr', 'elasticnet'
-        list_model_assess: list of str, optional (default=None)
-            The list of names of models to assess. If None, uses the same as `list_optimise`.
-        boosted_early_stopping_rounds:
-            !!!! NOT FOR GRADIENT AND HISTGRADIENTBOOST! only for non sklearn regressors
-        nominal_columns:
-            !!!!
-        ordinal_columns:
-            !!!!
-        fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
-            The list of fractions of the data to use for fitting the models.
-        random_state: int
-            The random seed to use, default is 42.
-        warning_verbosity: str
-            The warning verbosity to use, default is 'ignore'.
+    Parameters:
+    -----------
+    y: pandas.DataFrame
+        Target values of shape (n_samples, 1).
+    X: pandas.DataFrame
+        Features of shape (n_samples, n_features).
+    test_frac: float, optional (default=0.2)
+        Fraction of the data to use as test data.
+    timeout: int, optional (default=600)
+        Timeout in seconds for optimization of hyperparameters.
+    n_trial: int, optional (default=100)
+        Number of trials for optimization of hyperparameters.
+    cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
+        The cross-validation object to use for evaluation of models.
+    sampler: callable, optional (default=TPESampler with seed=random_state)
+        The sampler object to use for optimization of hyperparameters.
+    pruner: callable, optional (default=HyperbandPruner with min_resource=1, max_resource='auto', reduction_factor=3)
+        The pruner object to prune unpromising training trials.
+    poly_value: int, float, dict, optional (default=None)
+        The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
+    spline_value: int, float, dict, optional (default=None)
+        The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or 5
+    pca_value: int, float, dict, optional (default=None). 
+        The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
+    metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
+        The metric to use for optimization of hyperparameters.
+    metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
+        The metrics to use for assessment of models.
+    optimisation_direction: str, optional (default='minimize')
+        The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
+    write_folder: str, optional (default='/auto_regression/' in the current working directory)
+        The folder where to write the results and models.
+    overwrite: bool, optional (default=False)
+        Whether to overwrite the existing files in the write_folder.
+    models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
+        The list of names of models to optimize, varies depending on whether objective is regression or classification.
+        Check documentation of AutomatedML children classes for details
+    models_to_assess: list of str, optional (default=None)
+        The list of names of models to assess. If None, uses the same as `list_optimise`.
+    boosted_early_stopping_rounds:
+        !!!! NOT FOR GRADIENT AND HISTGRADIENTBOOST! only for non sklearn regressors
+    nominal_columns:
+        !!!!
+    ordinal_columns:
+        !!!!
+    fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
+        The list of fractions of the data to use for fitting the models.
+    random_state: int
+        The random seed to use, default is 42.
+    warning_verbosity: str
+        The warning verbosity to use, default is 'ignore'.
 
-        Methods
-        -------
-        regression_hyperoptimise:
-            Performs hyperparameter optimization using the Optuna library. The method contains several
-            nested functions and follows a pipeline for training and evaluating a regressor. The method starts by
-            preparing the study for hyperparameter optimization and loops through each regressor in the list
-            "regressors_2_optimise", optimizes its hyperparameters, and saves the final study iteration as a pickle file.
+    Methods
+    -------
+    regression_hyperoptimise:
+        Performs hyperparameter optimization using the Optuna library. The method contains several
+        nested functions and follows a pipeline for training and evaluating a regressor. The method starts by
+        preparing the study for hyperparameter optimization and loops through each regressor in the list
+        "regressors_2_optimise", optimizes its hyperparameters, and saves the final study iteration as a pickle file.
 
-        regression_select_best:
-            This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
-            attribute and store them in the estimators attribute of the class instance.
+    regression_select_best:
+        This method is used to create estimator pipelines for all the regressors specified in models_to_assess
+        attribute and store them in the estimators attribute of the class instance.
 
-        regression_evaluate:
+    regression_evaluate:
 
-        apply:
-            applies in correct order the 'split_train_test', 'regression_hyperoptimise', 'regression_select_best' and
-            'regression_evaluate' methods.
+    apply:
+        applies in correct order the 'split_train_test', 'regression_hyperoptimise', 'regression_select_best' and
+        'regression_evaluate' methods.
 
-        Returns
-        -------
-        None
+    Returns
+    -------
+    None
 
-        """
-        self.y = y
-        self.X = X
-        self.test_frac = test_frac
-        self.timeout = timeout
-        self.n_trial = n_trial
-        self.cross_validation = cross_validation if 'split' in dir(cross_validation) else \
-            KFold(n_splits=5, shuffle=True, random_state=random_state)
-        self.sampler = sampler if 'optuna.samplers' in type(sampler).__module__ else TPESampler(seed=random_state)
-        self.pruner = pruner if 'optuna.pruners' in type(pruner).__module__ else \
+    """
+    
+    y: pd.DataFrame
+    X: pd.DataFrame
+    test_frac: float = 0.2
+    timeout: int = 600
+    n_trial: int = 100
+    cross_validation: callable = None
+    sampler: callable = None
+    pruner: callable = None
+    poly_value: Union[int, float, dict, type(None)] = None
+    spline_value: Union[int, float, dict, type(None)] = None
+    pca_value: Union[int, float, dict, type(None)] = None
+    metric_optimise: Callable = None
+    metric_assess: List[Callable] = None
+    optimisation_direction: str = 'maximize'
+    write_folder: str = os.getcwd() + '/AUTOML/'
+    overwrite: bool = False
+    boosted_early_stopping_rounds: int = 20
+    nominal_columns: Union[List[str], type(None)] = None
+    ordinal_columns: Union[List[str], type(None)] = None
+    fit_frac: List[float] = None
+    random_state: Union[int, type(None)] = 42
+    warning_verbosity: str = 'ignore'
+    X_train: pd.DataFrame = None
+    X_test: pd.DataFrame = None
+    y_train: pd.DataFrame = None
+    y_test: pd.DataFrame = None
+    train_index: Any = None
+    test_index: Any = None
+    estimators: List[Callable] = None
+    y_pred: Any = None
+    summary: Dict[str, List[float]] = None
+
+    _models_optimize: List[Callable] = None
+    _models_assess: List[Callable] = None
+    _ml_objective: str = None
+    _shuffle: bool = True
+    _stratify: pd.DataFrame = None
+    
+
+    # -- conditionally mutate __init__ and call initialization functions
+    def __post_init__(self):
+        
+        self.cross_validation = self.cross_validation if 'split' in dir(self.cross_validation) else \
+            KFold(n_splits=5, shuffle=True, random_state=self.random_state)
+    
+        self.sampler = self.sampler if 'optuna.samplers' in type(self.sampler).__module__ else \
+            TPESampler(seed=self.random_state)
+            
+        self.pruner = self.pruner if 'optuna.pruners' in type(self.pruner).__module__ else \
             optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
-        self.poly_value = poly_value
-        self.spline_value = spline_value
-        self.pca_value = pca_value
-        self.optimisation_direction = optimisation_direction
-        self.write_folder = write_folder
-        self.overwrite = overwrite
-        self.metric_optimise = metric_optimise
-        self.metric_assess = metric_assess
-        self.list_model_optimise = list_model_optimise
-        self.list_model_assess = list_model_assess
-        self.model_optimise = model_optimise
-        self.model_assess = model_assess
-        self.nominal_columns = nominal_columns
-        self.ordinal_columns = ordinal_columns
-        self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if fit_frac is None else fit_frac
-        self.ml_objective = ml_objective
-        self.random_state = random_state
-        self.boosted_early_stopping_rounds = boosted_early_stopping_rounds
-        self.warning_verbosity = warning_verbosity
+            
+        self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if self.fit_frac is None else self.fit_frac
+        
         self.create_dir()
-
-        self.X_train = None
-        self.X_test = None
-        self.y_train = None
-        self.y_test = None
-        self.train_index = None
-        self.test_index = None
-        self.estimators = None
-        self.y_pred = None
-        self.summary = None
+        self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
+        
 
     def create_dir(self):
         if not os.path.exists(self.write_folder):
             os.makedirs(self.write_folder)
         return self
+
 
     def split_train_test(self, shuffle: bool = True, stratify: pd.DataFrame = None ):
         """
@@ -203,9 +192,10 @@ class AutomatedML:
         self.X.columns = self.X.columns.astype(str)
 
         # -- split dataframes
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
-                                                                        random_state=self.random_state, shuffle=shuffle,
-                                                                        stratify = stratify)
+        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y,
+                                                            test_size=self.test_frac,
+                                                            random_state=self.random_state, shuffle=shuffle,
+                                                            stratify=stratify)
 
         self.X_train = X_train
         self.X_test = X_test
@@ -220,20 +210,20 @@ class AutomatedML:
     @FuncHelper.method_warning_catcher
     def model_hyperoptimise(self) -> AutomatedML:
         """
-        Performs hyperparameter optimization on the regression models specified in `self.list_model_optimise` using Optuna.
+        Performs hyperparameter optimization on the regression models specified in `self.models_to_optimize` using Optuna.
         The optimization is performed on the training data and the final study is saved to disk.
         
         Returns:
             AutomatedRegression: The instance of the class with the updated study information.
             
         Raises:
-            CatBoostError: If `catboost` is one of the regressors in `self.list_model_optimise`, the optimization process
+            CatBoostError: If `catboost` is one of the regressors in `self.models_to_optimize`, the optimization process
             may raise this error if there is an issue with the `catboost` library.
         """
 
         def _optimise():
             """
-            Optimizes the regressors specified in the `self.list_model_optimise` dictionary using Optuna.
+            Optimizes the regressors specified in the `self.models_to_optimize` dictionary using Optuna.
             The study direction, sampler, and pruner are specified in the `self.optimisation_direction`, `self.sampler`, 
             and `self.pruner` attributes respectively. 
             
@@ -242,13 +232,13 @@ class AutomatedML:
             """
 
             # -- if catboost is loaded prepare special catch for common catboost errors
-            if 'catboost' in list(self.model_optimise.keys()):
+            if 'catboost' in list(self._models_optimize.keys()):
                 import catboost
                 catch = (catboost.CatBoostError,)
             else:
                 catch = ( )
 
-            for model_name, (model, create_params) in self.model_optimise.items():
+            for model_name, (model, create_params) in self._models_optimize.items():
                 study = optuna.create_study(direction=self.optimisation_direction, sampler=self.sampler,
                                             pruner=self.pruner)
 
@@ -319,7 +309,7 @@ class AutomatedML:
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
 
                 # -- allow for transformed regressor
-                if self.ml_objective == 'regression':
+                if self._ml_objective == 'regression':
                     # -- Instantiate transformer for dependents
                     transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
 
@@ -327,7 +317,7 @@ class AutomatedML:
                         regressor=model_with_parameters,
                         transformer=transformer
                     )
-                elif self.ml_objective == 'classification':
+                elif self._ml_objective == 'classification':
                     model_final = model_with_parameters
 
                 # -- Make a pipeline
@@ -466,14 +456,14 @@ class AutomatedML:
             
             return performance
 
-        if bool(self.model_optimise):
+        if bool(self._models_optimize):
             _optimise()
 
             return self
 
     def model_select_best(self) -> AutomatedML:
         """
-        This method is used to create estimator pipelines for all the regressors specified in list_regressors_assess
+        This method is used to create estimator pipelines for all the regressors specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
 
         The method loads the study result for each regressor from the file with name "{regressor_name}.pkl" in
@@ -488,7 +478,7 @@ class AutomatedML:
         """
 
         estimators = []
-        for model_name in self.list_model_assess:
+        for model_name in list(self._models_assess.keys()):
             study = joblib.load(self.write_folder + model_name + '.pkl')
 
             # -- select parameters corresponding to regressor
@@ -506,17 +496,17 @@ class AutomatedML:
             pca = PcaChooser(pca_value=study.best_params.get('pca_value')).fit()
             scaler = ScalerChooser(arg=study.best_params.get('scaler')).string_to_func()
 
-            model_with_parameters = self.model_assess[model_name][0](**parameter_dict)
+            model_with_parameters = self._models_assess[model_name][0](**parameter_dict)
 
             # -- Create transformed regressor
-            if self.ml_objective == 'regression':
+            if self._ml_objective == 'regression':
                 transformer = TransformerChooser(study.best_params.get('n_quantiles'), self.random_state).fit()
 
                 model_final = TransformedTargetRegressor(
                     regressor=model_with_parameters,
                     transformer=transformer
                 )
-            elif self.ml_objective == 'classification':
+            elif self._ml_objective == 'classification':
                 model_final = model_with_parameters
 
             pipe_single_study = Pipeline([
@@ -537,7 +527,7 @@ class AutomatedML:
         """
         Regression evaluation method of an estimator.
 
-        This method will evaluate the regression performance of the estimators specified in 'list_regressors_assess' by
+        This method will evaluate the regression performance of the estimators specified in 'models_to_assess' by
         splitting the test data into folds according to the cross-validation specified, training the estimators on the
         training data and evaluating the predictions on the test data. The performance will be stored in a dictionary
         per metric per estimator. If the estimator is the stacked regressor, it will be saved to disk.
@@ -554,7 +544,7 @@ class AutomatedML:
         indexes_test_cv = list(self.cross_validation.split(self.X_test))
 
         # -- determine names of models to assess
-        models_to_assess = self.list_model_assess + ['stacked']
+        models_to_assess = self.models_to_assess + ['stacked']
 
         # -- create an empty dictionary to populate with performance while looping over regressors
         summary = dict([(model, list()) for model in models_to_assess])
@@ -567,11 +557,11 @@ class AutomatedML:
                 estimator_temp = self.estimators
 
                 # -- fit stacked model while catching warnings
-                if self.ml_objective == 'regression':
+                if self._ml_objective == 'regression':
                     model_final = StackingRegressor(estimators=estimator_temp,
                                                         final_estimator=Ridge(random_state=self.random_state),
                                                         cv=self.cross_validation)
-                elif self.ml_objective == 'classification':
+                elif self._ml_objective == 'classification':
                     model_final = StackingClassifier(estimators=estimator_temp,
                                                         final_estimator=RidgeClassifier(random_state=self.random_state),
                                                         cv=self.cross_validation)
@@ -638,154 +628,11 @@ class AutomatedML:
         return self
 
     def apply(self, stratify = None):
-        self.split_train_test(stratify = stratify)
         self.model_hyperoptimise()
         self.model_select_best()
         self.model_evaluate()
 
         return self
 
-
-#%%
-
-class AutomatedRegression(AutomatedML):
-
-    def __init__(self,
-                  y: pd.DataFrame,
-                  X: pd.DataFrame,
-                  test_frac: float = 0.2,
-                  timeout: int = 600,
-                  n_trial: int = 100,
-                  nominal_columns: Union[List[str], type(None)] = None,
-                  ordinal_columns: Union[List[str], type(None)] = None,
-                  cross_validation: callable = None,
-                  sampler: callable = None,
-                  pruner: callable = None,
-                  poly_value: Union[int, float, dict, type(None)] = None,
-                  spline_value: Union[int, float, dict, type(None)] = None,
-                  pca_value: Union[int, float, dict, type(None)] = None,
-                  metric_optimise: Callable = median_absolute_error,
-                  metric_assess: List[Callable] = None,
-                  list_regressors_optimise = None,
-                  list_regressors_assess = None,
-                  optimisation_direction: str = 'minimize',
-                  write_folder: str = os.getcwd() + '/auto_regression/',
-                  overwrite: bool = False,
-                  list_optimise: List[str] = None,
-                  list_assess: List[str] = None,
-                  fit_frac: List[float] = None,
-                  boosted_early_stopping_rounds: int = 20,
-                  random_state: Union[int, type(None)] = 42,
-                  warning_verbosity: str = 'ignore'):
-
-        self.ml_objective = 'regression'
-        list_regressors_assess = list_regressors_optimise if list_regressors_assess is None else \
-            list_regressors_assess
-        self.model_optimise = regressor_selector(regressor_names=list_regressors_optimise,
-                                                        random_state=random_state)
-        self.model_assess = regressor_selector(regressor_names=list_regressors_assess,
-                                                      random_state=random_state)
-
-        super().__init__(y = y,
-                          X = X,
-                          test_frac = test_frac,
-                          timeout = timeout,
-                          n_trial = n_trial,
-                          nominal_columns = nominal_columns,
-                          ordinal_columns = ordinal_columns,
-                          cross_validation = cross_validation,
-                          sampler = sampler,
-                          pruner = pruner,
-                          poly_value= poly_value,
-                          spline_value = spline_value,
-                          pca_value = pca_value,
-                          metric_optimise = metric_optimise,
-                          metric_assess = [median_absolute_error, r2_score] if metric_assess is None else metric_assess,
-                          list_model_optimise = list_regressors_optimise,
-                          list_model_assess = list_regressors_assess,
-                          model_optimise = self.model_optimise,
-                          model_assess = self.model_assess,
-                          optimisation_direction = optimisation_direction,
-                          write_folder = write_folder,
-                          overwrite = overwrite,
-                          fit_frac = fit_frac,
-                          random_state = random_state,
-                          boosted_early_stopping_rounds = boosted_early_stopping_rounds,
-                          warning_verbosity = warning_verbosity,
-                          ml_objective = 'regression')
-
-
-
-class AutomatedClassification(AutomatedML):
-
-    def __init__(self,
-                  y: pd.DataFrame,
-                  X: pd.DataFrame,
-                  test_frac: float = 0.2,
-                  timeout: int = 600,
-                  n_trial: int = 100,
-                  nominal_columns: Union[List[str], type(None)] = None,
-                  ordinal_columns: Union[List[str], type(None)] = None,
-                  cross_validation: callable = None,
-                  sampler: callable = None,
-                  pruner: callable = None,
-                  poly_value: Union[int, float, dict, type(None)] = None,
-                  spline_value: Union[int, float, dict, type(None)] = None,
-                  pca_value: Union[int, float, dict, type(None)] = None,
-                  metric_optimise: Callable = accuracy_score,
-                  metric_assess: List[Callable] = None,
-                  list_classifiers_optimise = None,
-                  list_classifiers_assess = None,
-                  optimisation_direction: str = 'maximize',
-                  write_folder: str = os.getcwd() + '/auto_regression/',
-                  overwrite: bool = False,
-                  list_optimise: List[str] = None,
-                  list_assess: List[str] = None,
-                  fit_frac: List[float] = None,
-                  boosted_early_stopping_rounds: int = 20,
-                  random_state: Union[int, type(None)] = 42,
-                  warning_verbosity: str = 'ignore'):
-
-        list_classifiers_assess = list_classifiers_optimise if list_classifiers_assess is None else \
-            list_classifiers_assess
-        n_classes = len(set(y)) + 1
-        self.model_optimise = classifier_selector(classifier_names=list_classifiers_optimise,
-                                                        random_state=random_state, n_classes = n_classes)
-        self.model_assess = classifier_selector(classifier_names=list_classifiers_assess,
-                                                      random_state=random_state, n_classes = n_classes)
-        precision_score_macro = [lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')]
-
-        super().__init__(y = y,
-                          X = X,
-                          test_frac = test_frac,
-                          timeout = timeout,
-                          n_trial = n_trial,
-                          nominal_columns = nominal_columns,
-                          ordinal_columns = ordinal_columns,
-                          cross_validation = cross_validation,
-                          sampler = sampler,
-                          pruner = pruner,
-                          poly_value= poly_value,
-                          spline_value = spline_value,
-                          pca_value = pca_value,
-                          metric_optimise = metric_optimise,
-                          metric_assess = [accuracy_score, precision_score_macro] if \
-                              metric_assess is None else metric_assess,
-                          list_model_optimise = list_classifiers_optimise,
-                          list_model_assess = list_classifiers_assess,
-                          model_optimise = self.model_optimise,
-                          model_assess = self.model_assess,
-                          optimisation_direction = optimisation_direction,
-                          write_folder = write_folder,
-                          overwrite = overwrite,
-                          fit_frac = fit_frac,
-                          random_state = random_state,
-                          boosted_early_stopping_rounds = boosted_early_stopping_rounds,
-                          warning_verbosity = warning_verbosity,
-                          ml_objective = 'classification')
-
-
-    def apply(self):
-        return super().apply(stratify = self.y)
 
 
