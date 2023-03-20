@@ -23,12 +23,12 @@ regression = AutomatedRegression(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=10,
+    n_trial=2,
     nominal_columns=['nine'],
     ordinal_columns=['ten'],
     reload_study=True,
-    reload_trial_cap=True,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression3',
+    reload_trial_cap=False,
+    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression4',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars'],
@@ -37,11 +37,11 @@ regression = AutomatedRegression(
     n_weak_models=5
     )
 
-regression.apply()
-regression.summary
+# regression.apply()
+# regression.summary
 
-# regression.model_select_best()
-# regression.model_evaluate()
+regression.model_select_best()
+regression.model_evaluate()
 
 #%% Classification
 
@@ -50,21 +50,21 @@ X, y = make_classification(
     n_samples=1000, n_features=15, n_redundant=0, n_informative=10, random_state=42, n_classes = 3, n_clusters_per_class=1
 )
 classification = AutomatedClassification(
-    y=df_y,
-    X=df_X,
+    y=y,
+    X=X,
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=10,
-    nominal_columns=['nine'],
-    ordinal_columns=['ten'],
+    n_trial=30,
+    # nominal_columns=['nine'],
+    # ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=True,
     write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_classification0',
     metric_assess=[lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')],
     optimisation_direction='maximize',
-    models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars'],
-    models_to_assess=[ 'lassolars', 'lightgbm','bayesianridge'],
+    models_to_optimize=['sgd', 'lightgbm', 'svc'],
+    models_to_assess=[ 'svc', 'lightgbm','sgd'],
     boosted_early_stopping_rounds = 20,
     n_weak_models=5
     )

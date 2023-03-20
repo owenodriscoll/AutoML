@@ -36,7 +36,7 @@ class AutomatedClassification(AutomatedML):
             self.metric_assess: List[Callable] = [accuracy_score, precision_score_macro]
 
         if self.models_to_optimize is None: 
-            self.models_to_optimize: List[str] = ['lassolars', 'bayesianridge', 'histgradientboost']
+            self.models_to_optimize: List[str] = ['svc', 'sgd', 'histgradientboost']
             
         if self.models_to_assess is None:
             self.models_to_assess: List[str] = self.models_to_optimize

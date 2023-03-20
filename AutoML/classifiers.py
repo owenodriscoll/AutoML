@@ -33,7 +33,7 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     
     """
 
-    methods = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'lassolars', 'adaboost',
+    methods = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'adaboost',
                'gradientboost', 'histgradientboost','knn', 'sgd', 'bagging', 'svc'
                   ]
     selected_methods = list(set(classifier_names) & set(methods))
@@ -249,16 +249,18 @@ def knn_loader():
 
 def sgd_loader(random_state):
     
-    from sklearn.neighbors import SGDClassifier
+    from sklearn.linear_model import SGDClassifier
     
     def sgdHParams(trial):
         param_dict = {}
-        param_dict['loss'] =  trial.suggest_categorical("loss", ['hinge', 'log_loss', 'squared_error', 
+        param_dict['loss'] =  trial.suggest_categorical("loss", ['squared_error', 
                                                                  'huber', 'epsilon_insensitive', 
                                                                  'squared_epsilon_insensitive',
                                                                  'modified_huber', 'squared_hinge', 
                                                                  'perceptron', 
                                                                  ])
+        # loss penalty='l1' and loss='hinge' is not supported
+        #  penalty='l1' and loss='squared_hinge' is not supported
         param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2', 'l1', 'elasticnet'])
         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
         if (param_dict['penalty'] == 'elasticnet') :
@@ -295,7 +297,9 @@ def svc_loader(random_state):
     def svcHParams(trial):
         param_dict = {}
         param_dict['loss'] = trial.suggest_categorical("loss", ['hinge', 'squared_hinge'])
-        param_dict['penalty'] = trial.suggest_categorical("penalty", ['l1', 'l2'])
+        
+        param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2'])
+        # loss penalty='l1' and loss='hinge' is not supported
         param_dict['C'] = trial.suggest_float("C", 1e-5, 1e2, log = True)
         param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2, log = True)
         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])

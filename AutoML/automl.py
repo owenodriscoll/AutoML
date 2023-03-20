@@ -136,6 +136,8 @@ class AutomatedML:
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
     write_folder: str = os.getcwd() + '/AUTOML/'
+    reload_study: bool = False,
+    reload_trial_cap: bool = False,
     overwrite: bool = False
     boosted_early_stopping_rounds: int = 20
     nominal_columns: Union[List[str], type(None)] = None
@@ -624,7 +626,6 @@ class AutomatedML:
                 elif self._ml_objective == 'classification':
                     model_final = model_with_parameters
 
-
                 pipe_single_study = Pipeline([
                     ('categorical', categorical),
                     ('poly', poly),
@@ -662,7 +663,7 @@ class AutomatedML:
         indexes_test_cv = list(self.cross_validation.split(self.X_test))
 
         # -- determine names of models to assess
-        models_to_assess = self.models_to_assess + ['stacked']
+        models_to_assess = self.list_all_models_assess + ['stacked']
 
         # -- create an empty dictionary to populate with performance while looping over models
         summary = dict([(model, list()) for model in models_to_assess])
