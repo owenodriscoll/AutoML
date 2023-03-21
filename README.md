@@ -1,53 +1,98 @@
-# auto_ML_custom
-## Contents
-- `automated_ML.py`: file containing automised machine learning algorithms 
-- `example_automated_ML.ipynb`: example notebook for regression on California house price dataset
-- `optuna_visualisation.py`: python script to visualise intermediate optimisation REQUIRES UPDATE
-- `auto_ML_env.yml.`: environment file containing all the necessary packages (along with a LOT of clutter, best to manually download missing packages)
+# AutoML: Automated Machine Learning
+## Intro
+AutoML is a python project focussed on automating much of the machine learning efforts encountered in zero-dimensional regression and classification (and thus not multidimensional data such as for a CNN). It relies on existing Python packages Sci-Kit Learn, Optuna and model specific packages LightGBM, CatBoost and XGBoost.
+
+AutoML works by assessing the performance of various machine-learning models for a set number of trials over a pre-defined range of hyperparameters. During succesive trials the hyperparameters are optimized following a user-defined methodology (the default optimisation uses Bayesian search). Unpromising trials are stopped (pruned) early by assessing performance on an incrementally increasing fraction of training data, saving computational resources. Hyperparameter optimization trials are stored locally on disk, allowing the training to be picked up after interuption. The best trials of the defined models are reloaded and combined, or stacked, to form a final model. This final model is assessed and, due to the nature of stacking, tends to outperform any of its constituting models.
+
+AutoML contains several additional functionalities beyond the hyperoptimization and stacking of models: 
+* scaling of the input `X`-matrix (tested for on default)
+* normal transformation of the `y`-matrix (tested for on default)
+* PCA compression
+* spline transformation
+* polynomial expansion
+* categorical feature support (nominal and ordinal)
+* bagging of weak models in addition to optimized models
 
 
-
-## automated_ML.py
-Package to call for automated regression. The `automated_regression` function performs several operations in one:
-* Splits data into training and testing fractions
-* Optimisation of specified regression models following specified metrics
-* Optimisation of various X-scalers and y-transformers
-* Optionally optimises the inclusion of PCA compression, spline transformer or a polynomial expansion of X
-* Stacks optimized regressors using a final ridge regression
-* Returns the performance metrics per regressor (including final stacked regressor) on test dataset
-
-Note: 
-- Recommended to select a unique `write_folder` to store intermediate optimisation progress, otherwise each run will generate (or overwrite) previous optimisation.
-- Function is designed for continuous data and regression only, not time series or classifications.
-
-### Example
-For a more detailed example checkout `example_automated_ML.ipynb`
-
-```python
-import pandas as pd
-import sklearn
-import automl
-from sklearn.datasets import fetch_california_housing
-
-dataset = fetch_california_housing()
-X_full, y_full = dataset.data, dataset.target
-y = pd.DataFrame(y_full)
-X = pd.DataFrame(X_full)
-
-metric_performance_summary_dict, idexes_test_kfold, test_index, train_index, y_pred, y_test = automl.automated_regression(
-            y = y, X = X, test_frac = 0.2, timeout = 600, n_trial = 100, 
-            metric_optimise = sklearn.metrics.mean_pinball_loss,  metric_assess = [sklearn.metrics.mean_pinball_loss, sklearn.metrics.mean_squared_error, sklearn.metrics.r2_score],
-            optimisation_direction = 'minimize',  overwrite = True, 
-            list_regressors_hyper = ['lightgbm', 'bayesianridge'], list_regressors_training = None, 
-            random_state = 42)
-
+## Setup
+First clone the repository
+```
+git clone https://github.com/owenodriscoll/AutoML
 ```
 
-## optuna_visualisation.py
-insert
+Then create the conda environment with all requirement packages
+```
+conda env create -f env_AutoML.yml
+```
 
-## to do
-* add classification
-* add time serires support
-* add ability to restart training
-* add add classes?
+## Use
+
+For a more detailed example checkout `AutoML_example.ipynb`
+
+Minimal use case regression:
+```python
+from sklearn.metrics import r2_score
+from AutoML import AutomatedRegression
+
+X, y = make_regression(n_samples=1000, n_features=10, n_informative=2, random_state=42)
+
+regression = AutomatedRegression(
+    y=y,
+    X=X,
+    n_trial=10,
+    timeout=100
+    metric_optimise=r2_score,
+    optimisation_direction='maximize',
+    models_to_optimize=['bayesianridge', 'lightgbm'],
+    )
+    
+regression.apply()
+regression.summary
+```
+
+Expanded options use case regression:
+```python
+from optuna.samplers import TPESampler
+from optuna.pruners import HyperbandPruner
+from sklearn.metrics import r2_score
+from sklearn.model_selection import KFold
+from AutoML import AutomatedRegression
+
+X, y = make_regression(n_samples=1000, n_features=10, n_informative=2, random_state=42)
+
+# -- adding categorical features
+df_X = pd.DataFrame(X)
+df_X['nine'] = pd.cut(df_X[9], bins=[-float('Inf'), -3, -1, 1, 3, float('Inf')], labels=['a', 'b', 'c', 'd', 'e'])
+df_X['ten'] = pd.cut(df_X[9], bins=[-float('Inf'), -1, 1, float('Inf')], labels=['A', 'B', 'C'])
+df_y = pd.Series(y)
+
+regression = AutomatedRegression(
+    y=df_y,
+    X=df_X,
+    test_frac=0.2,
+    fit_frac=[0.2, 0.4, 0.6, 1],
+    n_trial=50,
+    timeout=600,
+    metric_optimise=r2_score,
+    optimisation_direction='maximize',
+    cross_validation=KFold(n_splits=5, shuffle=True, random_state=42),
+    sampler=TPESampler(seed=random_state),
+    pruner=HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3),
+    reload_study=False,
+    reload_trial_cap=False,
+    write_folder='/auto_regression_test',
+    models_to_optimize=['bayesianridge', 'lightgbm'],
+    nominal_columns=['nine'],
+    ordinal_columns=['ten'],
+    pca_value=0.95,
+    spline_value={'n_knots': 5, 'degree':3},
+    poly_value={'degree': 2, 'interaction_only': True},
+    boosted_early_stopping_rounds=100,
+    n_weak_models=5,
+    random_state=42,
+    )
+
+regression.apply()
+regression.summary
+    
+```
