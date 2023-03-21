@@ -192,7 +192,7 @@ def lassolars_loader(random_state):
     def lassoLarsHParams(trial):
         param_dict = {}
         param_dict['alpha'] = trial.suggest_float("alpha", 1e-8, 1e2, log = True)
-        param_dict['normalize'] = trial.suggest_categorical("normalize", [False])
+        # param_dict['normalize'] = trial.suggest_categorical("normalize", [False])
         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
         return param_dict
     

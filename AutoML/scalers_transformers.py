@@ -132,7 +132,7 @@ class CategoricalChooser:
 
 
     def fit(self):
-        one_hot_encoder = OneHotEncoder(handle_unknown="ignore", sparse=False)
+        one_hot_encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
         ordinal_encoder = OrdinalEncoder()
         
         if type(self.ordinal_columns) == type(self.categorical_columns) == list:
