@@ -746,4 +746,4 @@ class AutomatedML:
         self.model_select_best()
         self.model_evaluate()
 
-        return self
+        #return self
