@@ -139,7 +139,7 @@ class AutomatedML:
     reload_study: bool = False,
     reload_trial_cap: bool = False,
     overwrite: bool = False
-    boosted_early_stopping_rounds: int = 20
+    boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], type(None)] = None
     ordinal_columns: Union[List[str], type(None)] = None
     fit_frac: List[float] = None
