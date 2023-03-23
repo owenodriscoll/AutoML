@@ -136,8 +136,8 @@ class AutomatedML:
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
     write_folder: str = os.getcwd() + '/AUTOML/'
-    reload_study: bool = False,
-    reload_trial_cap: bool = False,
+    reload_study: bool = False
+    reload_trial_cap: bool = False
     overwrite: bool = False
     boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], type(None)] = None
