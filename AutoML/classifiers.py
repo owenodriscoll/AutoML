@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Feb 13 16:38:24 2023
-
-@author: owen
-"""
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
 Created on Wed Jan 25 14:20:26 2023
 
 @author: owen
@@ -21,7 +13,7 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     
     Parameters
     ----------
-    regressor_names : list of str, regressor names with the following options:
+    classifier_names : list of str, regressor names with the following options:
         'dummy', 'lightgbm', 'xgboost', 'catboost', 'adaboost', 
         'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svc'
     n_classes
@@ -57,7 +49,11 @@ def classifier_selector(classifier_names, n_classes , random_state = None, ):
     # -- remove dictionary elements where regressor was not loaded
     method_dict_none_rem = {k: v for k, v in method_dict.items() if v is not None}
     
-    return method_dict_none_rem
+    # -- sort dictionary to the same order as the input regressors
+    index_map = {v: i for i, v in enumerate(classifier_names)}
+    method_dict_none_rem_sorted = dict(sorted(method_dict_none_rem.items(), key=lambda pair: index_map[pair[0]]))
+    
+    return method_dict_none_rem_sorted
     
 
         
