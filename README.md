@@ -15,15 +15,21 @@ AutoML contains several additional functionalities beyond the hyperoptimization 
 
 
 ## Setup
-First clone the repository
+pip install using:
+```
+pip install git+https://github.com/owenodriscoll/AutoML.git
+```
+
+... or clone the repository and then ...
 ```
 git clone https://github.com/owenodriscoll/AutoML
 ```
 
-Then create the conda environment with all requirement packages
+... create the conda environment with all requirement packages
 ```
 conda env create -f env_AutoML.yml
 ```
+
 
 ## Use
 
