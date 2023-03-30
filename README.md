@@ -1,5 +1,4 @@
 # AutoML: Automated Machine Learning
-[![DOI](https://zenodo.org/badge/590020958.svg)](https://zenodo.org/badge/latestdoi/590020958)
 ## Intro
 AutoML is a python project focussed on automating much of the machine learning efforts encountered in zero-dimensional regression and classification (and thus not multidimensional data such as for a CNN). It relies on existing Python packages Sci-Kit Learn, Optuna and model specific packages LightGBM, CatBoost and XGBoost.
 
