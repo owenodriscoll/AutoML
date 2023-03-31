@@ -7,3 +7,4 @@ scikit-learn==1.2.2
 numpy==1.24.2
 pandas==1.5.3
 SQLAlchemy==2.0.7
+notebook
