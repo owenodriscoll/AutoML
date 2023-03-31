@@ -27,7 +27,7 @@ git clone https://github.com/owenodriscoll/AutoML
 
 ... create the conda environment with all requirement packages
 ```
-conda env create -f environment.yml.yml
+conda env create -f environment.yml
 ```
 
 
