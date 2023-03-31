@@ -15,19 +15,42 @@ AutoML contains several additional functionalities beyond the hyperoptimization 
 
 
 ## Setup
-pip install using:
-```
-pip install git+https://github.com/owenodriscoll/AutoML.git
-```
-
-... or clone the repository and then ...
+### Method 1: cloning
+Clone the repository
 ```
 git clone https://github.com/owenodriscoll/AutoML
 ```
 
-... create the conda environment with all requirement packages
+Navigate to the cloned local repository and create the conda environment with all requirement packages
 ```
-conda env create -f environment.yml
+conda env create --name ENVNAME --file environment.yml
+```
+
+Activate new environment
+```
+conda activate ENVNAME
+```
+
+Having created an environment with all dependencies, install AutoML:
+```
+pip install git+https://github.com/owenodriscoll/AutoML.git
+```
+
+
+### Method 2: pip install
+Create a new environment to prevent pip install from breaking anything. Include a specific Python version
+```
+conda create -n ENVNAME -c conda-forge python=3.9.12
+```
+
+Activate new environment
+```
+conda activate ENVNAME
+```
+
+Pip install from GitHub including dependencies in requirements.text
+```
+pip install git+https://github.com/owenodriscoll/AutoML.git@main#egg=AutoML -r https://raw.githubusercontent.com/owenodriscoll/AutoML/main/requirements.txt
 ```
 
 
