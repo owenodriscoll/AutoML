@@ -1,9 +1,0 @@
-python=3.9.12
-catboost
-xgboost
-lightgbm
-optuna
-sklearn
-numpy
-pandas
-SQLAlchemy
