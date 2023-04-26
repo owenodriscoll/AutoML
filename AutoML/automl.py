@@ -4,6 +4,7 @@ import joblib
 import os, sys
 import pickle
 import random
+import shap
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 from sklearn.model_selection import KFold
 from sklearn.compose import TransformedTargetRegressor
+from sklearn.cluster import KMeans
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
 from sklearn.linear_model import Ridge, RidgeClassifier
@@ -118,6 +120,9 @@ class AutomatedML:
     model_evaluate:
         Evaluates performance of selected models. I first trains the models on the training dataset and
         then stacks the models and assesses performance on test fraction of dataset. 
+        
+    model_feature_importance:
+        Explains feature importance of stacked model using SHAP.  
 
     apply:
         applies in correct order 'model_hyperoptimize', 'model_select_best' and 'model_evaluate' methods.
@@ -169,6 +174,7 @@ class AutomatedML:
     _ml_objective: str = None
     _shuffle: bool = True
     _stratify: pd.DataFrame = None
+    _model_final = None
 
 
     # -- conditionally mutate __init__ and call initialization functions
@@ -686,19 +692,19 @@ class AutomatedML:
 
                 # -- fit stacked model while catching warnings
                 if self._ml_objective == 'regression':
-                    model_final = StackingRegressor(estimators=estimator_temp,
+                    self._model_final = StackingRegressor(estimators=estimator_temp,
                                                         final_estimator=Ridge(random_state=self.random_state),
                                                         cv=self.cross_validation)
                 elif self._ml_objective == 'classification':
-                    model_final = StackingClassifier(estimators=estimator_temp,
+                    self._model_final = StackingClassifier(estimators=estimator_temp,
                                                         final_estimator=RidgeClassifier(random_state=self.random_state),
                                                         cv=self.cross_validation)
 
-                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
 
                 # -- predict on the whole testing dataset
-                self.y_pred = model_final.predict(self.X_test)
+                self.y_pred = self._model_final.predict(self.X_test)
 
                 # -- store stacked model, if file already exists, confirm overwrite
                 write_file_stacked_model = self.write_folder + "stacked_model.joblib"
@@ -709,7 +715,7 @@ class AutomatedML:
 
                     if user_input != 'n':
                         response = "Stacked model overwritten"
-                        joblib.dump(model_final, write_file_stacked_model)
+                        joblib.dump(self._model_final, write_file_stacked_model)
                     else:
                         response = "Stacked model not saved"
 
@@ -717,12 +723,13 @@ class AutomatedML:
 
                 # -- if file doesn't exist, write it
                 if not os.path.isfile(write_file_stacked_model):
-                    joblib.dump(model_final, write_file_stacked_model)
+                    joblib.dump(self._model_final, write_file_stacked_model)
 
             else:
-                model_final = estimator_temp[0][1]
-                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                self._model_final = estimator_temp[0][1]
+                FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
+                
 
             # -- create dictionary with elements per metric allowing per metric fold performance to be stored
             metric_performance_dict = dict(
@@ -734,7 +741,7 @@ class AutomatedML:
                 fold_test = fold[1]
 
                 # -- Predict on the TEST data fold
-                prediction = model_final.predict(self.X_test.iloc[fold_test, :])
+                prediction = self._model_final.predict(self.X_test.iloc[fold_test, :])
 
                 # -- Assess prediction per metric and store per-fold performance in dictionary
                 [metric_performance_dict[key][1].append(
@@ -749,10 +756,76 @@ class AutomatedML:
             self.summary = summary
 
         return
+    
+    def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
+        """
+        Evaluates feature importance using shapely values. The SHAP kernel explainer is trained on 
+        the training data (or on the cluster thereof). Then the explainer calculates for the test 
+        data how parameters affect model performance.
 
+        Parameters
+        ----------
+        n_train_points: int, default=200
+            number of training observations (or clusters) for to use in explaining the model
+        n_test_points: int, default=200
+            number of test observations for which to assess feature importance
+        cluster: bool, default=True
+            whether to cluster the training data. If not individual points are chosen to create explainer 
+            
+        Returns
+        -------
+        shap_values:
+            Shapely values calculated for data
+        data:
+            Subset of test data on which shapely values are calculated
+        
+        
+        """
+        
+        # -- reload the final model if it exists
+        if type(self._model_final) is type(None):
+            try:
+                self._model_final = joblib.load(f"{self.write_folder}stacked_model.joblib")
+            except:
+                raise Exception(f"No trained model available in write_folder: {self.write_folder}")
+
+        # -- cluster the training data to speed up, otherwise randomly sample training data
+        if cluster:
+            print('Clustering...')
+            kmeans = KMeans(n_clusters = 100, n_init = 10).fit(self.X_train)
+            X_train_summary = kmeans.cluster_centers_
+            
+        else:
+            X_train_summary = self.X_train.sample(n = n_train_points, random_state = self.random_state)
+            
+        
+        # -- create explainer based on clustered training data
+        ex = FuncHelper.function_warning_catcher(shap.KernelExplainer, [self._model_final.predict, X_train_summary],
+                                            self.warning_verbosity)
+        
+        # -- select subset of test data 
+        data = self.X_test.sample(n = n_test_points, random_state = self.random_state)
+        feature_names = list(self.X_test.keys())
+
+        # -- calculate SHAP values
+        print('Calculating Shapely values...', flush=True)
+        shap_values = FuncHelper.function_warning_catcher(ex.shap_values, [data],
+                                                          self.warning_verbosity)
+
+        # -- create summary plot
+        shap.summary_plot(shap_values, features = data, feature_names = feature_names)
+        
+        # 
+        most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
+        shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
+
+        return pd.DataFrame(data = shap_values, columns = feature_names), data
+        
+    
     def apply(self, stratify = None):
         self.model_hyperoptimise()
         self.model_select_best()
         self.model_evaluate()
 
         return
+
