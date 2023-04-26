@@ -44,14 +44,14 @@ class AutomatedML:
         Timeout in seconds for optimization of hyperparameters.
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
-    n_weak_models:
+    n_weak_models: int, optional (default=0)
         Number of models to train stacked model on in addition to best model. For each specified
-        model the best performing and randomly selected n_weak_models models are used for stacking.
+        model the best performing and randomly selected n_weak_models are used for stacking.
         E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
         in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
         to include (unique) additional information from the additional models, despite them performing worse
         independly than the best model
-    n_jobs:
+    n_jobs: int, optional (default=1)
         number of simoultaneous threads to run optimisation on. Not recommended to choose values greater than
         number of CPU cores. Simoultaneous threads can result in asynchronous optimisation, e.g. Trial 10
         may complete before Trial 4 and therefore Trial 10 cannot incorporate information of Trial 4 in the
@@ -69,31 +69,33 @@ class AutomatedML:
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
-        The metric to use for optimization of hyperparameters.
+        The metric to use for optimization of hyperparameters. 
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
         The metrics to use for assessment of models.
     optimisation_direction: str, optional (default='minimize')
         The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
     write_folder: str, optional (default='/AUTOML/' in the current working directory)
         The folder where to write the results and models.
-    reload_study: bool, optional (default=True)
-            Whether to continue study if previous study exists in write_folder.
-    reload_trial_cap:
-            Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded
-            study already performed 40 trials, the new study will at most perform 10 additional trials
+    reload_study: bool, optional (default=False)
+        Whether to continue study if previous study exists in write_folder.
+    reload_trial_cap: bool, optional (default=False)
+        Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded
+        study already performed 40 trials, the new study will at most perform 10 additional trials
     models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
         The list of names of models to optimize, varies depending on whether objective is regression or classification.
         Check documentation of AutomatedML children classes for details
     models_to_assess: list of str, optional (default=None)
         The list of names of models to assess. If None, uses the same as `list_optimise`.
-    boosted_early_stopping_rounds:
+    boosted_early_stopping_rounds: int, optional (default=None)
         Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
-            less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
-            per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
-    nominal_columns:
-        !!!!
-    ordinal_columns:
-        !!!!
+        less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
+        per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
+    nominal_columns: list of Union[int, float, string)]
+        Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
+        Nominal columns contain unranked categories e.g. classes of weather type
+    ordinal_columns: list of Union[int, float, string)]
+        Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
+        Ordinal columns contain ranked categories e.g. hours of the day
     fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
         The list of fractions of the data to use for fitting the models.
     random_state: int
@@ -114,10 +116,11 @@ class AutomatedML:
         attribute and store them in the estimators attribute of the class instance.
 
     model_evaluate:
+        Evaluates performance of selected models. I first trains the models on the training dataset and
+        then stacks the models and assesses performance on test fraction of dataset. 
 
     apply:
-        applies in correct order 'model_hyperoptimize', 'model_select_best' and
-        'model_evaluate' methods.
+        applies in correct order 'model_hyperoptimize', 'model_select_best' and 'model_evaluate' methods.
 
     Returns
     -------
