@@ -7,7 +7,7 @@ from AutoML.AutoML import AutomatedRegression, AutomatedClassification
 
 #%% Regression
 
-X, y = make_regression(n_samples=1000, n_features=10, n_informative=5, random_state=42)
+X, y = make_regression(n_samples=100000, n_features=10, n_informative=5, random_state=42)
 
 
 df_X = pd.DataFrame(X)
@@ -23,25 +23,30 @@ regression = AutomatedRegression(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=2,
+    n_trial=20,
     nominal_columns=['nine'],
     ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=False,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression4',
+    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression12',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
-    models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars'],
-    models_to_assess=[ 'lassolars', 'lightgbm','bayesianridge'],
+    models_to_optimize=['lightgbm', 'bayesianridge'], 
+    models_to_assess=['lightgbm', 'bayesianridge'],
     boosted_early_stopping_rounds = 20,
     n_weak_models=5
     )
 
-# regression.apply()
+import time
+
+start = time.time()
+regression.apply()
+end = time.time()
+print(end - start)
 # regression.summary
 
-regression.model_select_best()
-regression.model_evaluate()
+# regression.model_select_best()
+# regression.model_evaluate()
 
 #%% Classification
 
