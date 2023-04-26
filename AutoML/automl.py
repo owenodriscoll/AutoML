@@ -44,6 +44,18 @@ class AutomatedML:
         Timeout in seconds for optimization of hyperparameters.
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
+    n_weak_models:
+        Number of models to train stacked model on in addition to best model. For each specified
+        model the best performing and randomly selected n_weak_models models are used for stacking.
+        E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
+        in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
+        to include (unique) additional information from the additional models, despite them performing worse
+        independly than the best model
+    n_jobs:
+        number of simoultaneous threads to run optimisation on. Not recommended to choose values greater than
+        number of CPU cores. Simoultaneous threads can result in asynchronous optimisation, e.g. Trial 10
+        may complete before Trial 4 and therefore Trial 10 cannot incorporate information of Trial 4 in the
+        selection of its hyperparameters.         
     cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
         The cross-validation object to use for evaluation of models.
     sampler: callable, optional (default=TPESampler with seed=random_state)
@@ -74,13 +86,6 @@ class AutomatedML:
         Check documentation of AutomatedML children classes for details
     models_to_assess: list of str, optional (default=None)
         The list of names of models to assess. If None, uses the same as `list_optimise`.
-    n_weak_models:
-            Number of models to train stacked model on in addition to best model. For each specified
-            model the best performing and randomly selected n_weak_models models are used for stacking.
-            E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
-            in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
-            to include (unique) additional information from the additional models, despite them performing worse
-            independly than the best model
     boosted_early_stopping_rounds:
         Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
             less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
@@ -126,6 +131,7 @@ class AutomatedML:
     timeout: int = 600
     n_trial: int = 100
     n_weak_models: int = 0
+    n_jobs: int = 1
     cross_validation: callable = None
     sampler: callable = None
     pruner: callable = None
@@ -329,7 +335,7 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout, catch=catch)
+                                      n_trials=n_trials, timeout=self.timeout, catch=catch, n_jobs=self.n_jobs)
 
             return
 
@@ -530,7 +536,7 @@ class AutomatedML:
         if bool(self._models_optimize):
             _optimise()
 
-            return self
+            return 
 
     def model_select_best(self, random_state_model_selection=None) -> AutomatedML:
         """
@@ -639,7 +645,7 @@ class AutomatedML:
         self.estimators = estimators
         self.list_all_models_assess = [estimator[0] for estimator in estimators]
 
-        return self
+        return
 
 
     def model_evaluate(self) -> AutomatedML:
@@ -739,11 +745,11 @@ class AutomatedML:
 
             self.summary = summary
 
-        return self
+        return
 
     def apply(self, stratify = None):
         self.model_hyperoptimise()
         self.model_select_best()
         self.model_evaluate()
 
-        #return self
+        return
