@@ -28,6 +28,7 @@ from .function_helper import FuncHelper
 # add time constraint to reloading
 # boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
 # several classification models accept class weights, implement class weight support
+# !!! add encoding for clustering of feature importance 
 
 @dataclass
 class AutomatedML:
@@ -816,8 +817,8 @@ class AutomatedML:
         shap.summary_plot(shap_values, features = data, feature_names = feature_names)
         
         # 
-        most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
-        shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
+        # most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
+        # shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
 
         return pd.DataFrame(data = shap_values, columns = feature_names), data
         
@@ -828,4 +829,31 @@ class AutomatedML:
         self.model_evaluate()
 
         return
+
+
+
+# df_X.rename(columns={"0": "a", "1": "b", "2": "c", "3": "d", "4": "e", "5": "f", "6": "g", "7": "h", "8": "i", ""})
+
+# X_train_summary = regression.X_train.sample(100)
+    
+
+# # -- create explainer based on clustered training data
+# ex = FuncHelper.function_warning_catcher(shap.KernelExplainer, [regression._model_final.predict, X_train_summary],
+#                                     regression.warning_verbosity)
+
+# # -- select subset of test data 
+# data = regression.X_test.sample(n = 20, random_state = regression.random_state)
+# feature_names = list(regression.X_test.keys())
+
+# # -- calculate SHAP values
+# print('Calculating Shapely values...', flush=True)
+# shap_values = FuncHelper.function_warning_catcher(ex.shap_values, [data],
+#                                                   self.warning_verbosity)
+
+# # -- create summary plot
+# shap.summary_plot(shap_values, features = data, feature_names = feature_names)
+
+# # 
+# most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
+# shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
 
