@@ -793,7 +793,7 @@ class AutomatedML:
         # -- cluster the training data to speed up, otherwise randomly sample training data
         if cluster:
             print('Clustering...')
-            kmeans = KMeans(n_clusters = 100, n_init = 10).fit(self.X_train)
+            kmeans = KMeans(n_clusters = n_train_points, n_init = 10).fit(self.X_train)
             X_train_summary = kmeans.cluster_centers_
             
         else:
