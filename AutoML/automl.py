@@ -11,10 +11,11 @@ from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 from sklearn.model_selection import KFold
+from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
-from sklearn.linear_model import Ridge, RidgeClassifier
+from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
@@ -684,15 +685,27 @@ class AutomatedML:
             if i == len(self.estimators):
                 estimator_temp = self.estimators
 
+                # -- create a scorer compatible with Cross Validated Ridge
+                greater_is_better = self.optimisation_direction == 'maximize'
+                scoring = make_scorer(
+                    self.metric_optimise, 
+                    greater_is_better = greater_is_better
+                    )
+
                 # -- fit stacked model while catching warnings
                 if self._ml_objective == 'regression':
-                    model_final = StackingRegressor(estimators=estimator_temp,
-                                                        final_estimator=Ridge(random_state=self.random_state),
-                                                        cv=self.cross_validation)
+                    model_final = StackingRegressor(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
+
                 elif self._ml_objective == 'classification':
-                    model_final = StackingClassifier(estimators=estimator_temp,
-                                                        final_estimator=RidgeClassifier(random_state=self.random_state),
-                                                        cv=self.cross_validation)
+                    model_final = StackingClassifier(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeClassifierCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
 
                 FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
