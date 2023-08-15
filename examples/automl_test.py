@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.datasets import make_regression, make_classification
 from sklearn.metrics import r2_score, accuracy_score, precision_score
-from AutoML.AutoML import AutomatedRegression, AutomatedClassification
+from AutoML import AutomatedRegression, AutomatedClassification
 
 # %reset -f
 
@@ -28,7 +28,7 @@ regression = AutomatedRegression(
     ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=False,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression4',
+    write_folder='C:/Users/oweno/Documents/Scripts/AutoML/examples/testdir',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars'],
