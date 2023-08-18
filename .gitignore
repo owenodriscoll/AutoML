@@ -1,0 +1,3 @@
+__pycache__
+examples/testdir*
+catboost_info/*
