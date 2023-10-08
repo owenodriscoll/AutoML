@@ -144,6 +144,7 @@ class AutomatedML:
     poly_value: Union[int, float, dict, type(None)] = None
     spline_value: Union[int, float, dict, type(None)] = None
     pca_value: Union[int, float, dict, type(None)] = None
+    fourrier_value: int = None
     metric_optimise: Callable = None
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
@@ -376,7 +377,7 @@ class AutomatedML:
                 poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
                 # -- create fourrier expansion
-                fourrier = FourrierExpansion(fourrier_value=self.fourrier_value)
+                fourrier = FourrierExpansion(fourrier_value=self.fourrier_value).fit()
 
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()

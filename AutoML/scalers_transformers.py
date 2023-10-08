@@ -161,27 +161,26 @@ class CategoricalChooser:
         return self.func_fitted
 
 
+#TODO make this less hacky, fix nonsensical "fit" method and resolve returning None
 class FourrierExpansion(BaseEstimator, TransformerMixin):
     def __init__(self, fourrier_value: int):
         self.fourrier_value = fourrier_value
 
-    def fit(self, X, y=None):
+    def fit(self, X=None, y=None):
         # Custom transformers that don't need to learn anything
         # from the data can leave the fit method empty.
-
-        return self
-
-    def transform(self, X):
-
         if self.fourrier_value == None:
             return None
         else:
-
+            return self
+        
+    def transform(self, X):
+        if self.fourrier_value == None:
+            return None
+        else:
             x_normalized = 2 * (X-X.min())/(X.max()-X.min()) -1
             x_expand = X
-
             for i in range(self.fourrier_value):
-                x_expand = pd.concat([x_expand, np.cos(i * x_normalized)], ignore_index=False, axis = 1)
-                x_expand = pd.concat([x_expand, np.sin(i * x_normalized)], ignore_index=False, axis = 1)
-
+                x_expand = np.concatenate([x_expand, np.cos(i * x_normalized)], axis = 1)
+                x_expand = np.concatenate([x_expand, np.sin(i * x_normalized)], axis = 1)
             return x_expand
