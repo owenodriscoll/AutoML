@@ -15,6 +15,9 @@ from sklearn.preprocessing import QuantileTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
+import numpy as np
+import pandas as pd
 
 from typing import Union
 from .function_helper import FuncHelper
@@ -56,11 +59,9 @@ class Chooser:
         self._report_trial()
         return self.func_fitted
 
-
 class PcaChooser(Chooser):
     def __init__(self, pca_value: Union[int, float, dict] = None, trial=None):
         super().__init__(arg=pca_value, func=PCA, transformer='pca_value', trial=trial)
-
 
 class PolyChooser(Chooser):
     def __init__(self, poly_value: Union[int, float, dict] = None, trial=None):
@@ -158,7 +159,28 @@ class CategoricalChooser:
             )
         
         return self.func_fitted
+
+
+#TODO make this less hacky, fix nonsensical "fit" method and resolve returning None
+class FourrierExpansion(BaseEstimator, TransformerMixin):
+    def __init__(self, fourrier_value: int):
+        self.fourrier_value = fourrier_value
+
+    def fit(self, X=None, y=None):
+        # Custom transformers that don't need to learn anything
+        # from the data can leave the fit method empty.
+        if self.fourrier_value == None:
+            return None
+        else:
+            return self
         
-        
-        
-        
+    def transform(self, X):
+        if self.fourrier_value == None:
+            return None
+        else:
+            x_normalized = 2 * (X-X.min())/(X.max()-X.min()) -1
+            x_expand = X
+            for i in range(self.fourrier_value):
+                x_expand = np.concatenate([x_expand, np.cos(i * x_normalized)], axis = 1)
+                x_expand = np.concatenate([x_expand, np.sin(i * x_normalized)], axis = 1)
+            return x_expand
