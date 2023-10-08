@@ -19,7 +19,7 @@ from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
-    TransformerChooser, CategoricalChooser
+    TransformerChooser, CategoricalChooser, FourrierExpansion
 from .function_helper import FuncHelper
 
 # try polynomial features with interactions_only = True, include_bias = False
@@ -67,6 +67,8 @@ class AutomatedML:
         The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
     spline_value: int, float, dict, optional (default=None)
         The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or 5
+    fourrier_value: int
+        fourrier_value
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
@@ -373,6 +375,9 @@ class AutomatedML:
                 spline = SplineChooser(spline_value=spline_input, trial=trial).fit_report_trial()
                 poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
+                # -- create fourrier expansion
+                fourrier = FourrierExpansion(fourrier_value=self.fourrier_value)
+
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
@@ -403,6 +408,7 @@ class AutomatedML:
                     ('poly', poly),
                     ('spline', spline),
                     ('scaler', scaler),
+                    ('fourrier', fourrier),
                     ('pca', pca),
                     ('model', model_final)
                     ])
