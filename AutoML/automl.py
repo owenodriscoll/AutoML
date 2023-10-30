@@ -482,9 +482,9 @@ class AutomatedML:
 
                     # -- determine if model is  boosted model
                     early_stopping_permitted = bool(
-                        set([model_name]) & set(['lightgbm', 'xgboost', 'catboost']))
+                        set([model_name]) & set(['xgboost', 'catboost'])) # TODO add early stopping for LightGBM using a callback
 
-                    if early_stopping_permitted:
+                    if early_stopping_permitted: 
                         # -- During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during
                         # the last step of the pipeline. Therefore we must first apply all previous
@@ -780,6 +780,8 @@ class AutomatedML:
     
     def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
         """
+        DOES NOT WORK WITH NON-NUMERIC DATA
+        
         Evaluates feature importance using shapely values. The SHAP kernel explainer is trained on 
         the training data (or on the cluster thereof). Then the explainer calculates for the test 
         data how parameters affect model performance.
