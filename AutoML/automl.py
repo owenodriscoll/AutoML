@@ -240,7 +240,7 @@ class AutomatedML:
         self.X.columns = self.X.columns.astype(str)
 
         # -- find and warn if non-numeric columns match
-        non_numeric_columns = (~self.X.map(np.isreal).any(axis = 0))
+        non_numeric_columns = (~self.X.applymap(np.isreal).any(axis = 0))
         non_numeric_column_names = non_numeric_columns.index[non_numeric_columns].to_list()
 
         if type(self.nominal_columns) == type(self.ordinal_columns) == list:
