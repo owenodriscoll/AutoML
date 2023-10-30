@@ -12,15 +12,16 @@ from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 from sklearn.model_selection import KFold
+from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.cluster import KMeans
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
-from sklearn.linear_model import Ridge, RidgeClassifier
+from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
-    TransformerChooser, CategoricalChooser
+    TransformerChooser, CategoricalChooser, FourrierExpansion
 from .function_helper import FuncHelper
 
 # try polynomial features with interactions_only = True, include_bias = False
@@ -69,6 +70,8 @@ class AutomatedML:
         The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
     spline_value: int, float, dict, optional (default=None)
         The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or 5
+    fourrier_value: int
+        fourrier_value
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
@@ -147,6 +150,7 @@ class AutomatedML:
     poly_value: Union[int, float, dict, type(None)] = None
     spline_value: Union[int, float, dict, type(None)] = None
     pca_value: Union[int, float, dict, type(None)] = None
+    fourrier_value: int = None
     metric_optimise: Callable = None
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
@@ -379,6 +383,9 @@ class AutomatedML:
                 spline = SplineChooser(spline_value=spline_input, trial=trial).fit_report_trial()
                 poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
+                # -- create fourrier expansion
+                fourrier = FourrierExpansion(fourrier_value=self.fourrier_value).fit()
+
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
@@ -409,6 +416,7 @@ class AutomatedML:
                     ('poly', poly),
                     ('spline', spline),
                     ('scaler', scaler),
+                    ('fourrier', fourrier),
                     ('pca', pca),
                     ('model', model_final)
                     ])
@@ -691,15 +699,27 @@ class AutomatedML:
             if i == len(self.estimators):
                 estimator_temp = self.estimators
 
+                # -- create a scorer compatible with Cross Validated Ridge
+                greater_is_better = self.optimisation_direction == 'maximize'
+                scoring = make_scorer(
+                    self.metric_optimise, 
+                    greater_is_better = greater_is_better
+                    )
+
                 # -- fit stacked model while catching warnings
                 if self._ml_objective == 'regression':
-                    self._model_final = StackingRegressor(estimators=estimator_temp,
-                                                        final_estimator=Ridge(random_state=self.random_state),
-                                                        cv=self.cross_validation)
+                    self._model_final = StackingRegressor(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
+
                 elif self._ml_objective == 'classification':
-                    self._model_final = StackingClassifier(estimators=estimator_temp,
-                                                        final_estimator=RidgeClassifier(random_state=self.random_state),
-                                                        cv=self.cross_validation)
+                    self._model_final = StackingClassifier(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeClassifierCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
 
                 FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)

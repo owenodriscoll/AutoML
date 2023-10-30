@@ -1,7 +1,10 @@
 import pandas as pd
 from sklearn.datasets import make_regression, make_classification
 from sklearn.metrics import r2_score, accuracy_score, precision_score
-from AutoML.AutoML import AutomatedRegression, AutomatedClassification
+# If AutoML is not installed, uncomment below to lines to allow for correct import
+# import os
+# os.chdir("..")
+from AutoML import AutomatedRegression, AutomatedClassification
 
 # %reset -f
 
@@ -23,16 +26,16 @@ regression = AutomatedRegression(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=20,
+    n_trial=10,
     nominal_columns=['nine'],
     ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=False,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression12',
+    write_folder=f'{os.path.dirname(__file__)}/testdir',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
-    models_to_optimize=['lightgbm', 'bayesianridge'], 
-    models_to_assess=['lightgbm', 'bayesianridge'],
+    models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars', 'xgboost', 'catboost'],
+    models_to_assess=[ 'lassolars', 'lightgbm','bayesianridge', 'xgboost', 'catboost'],
     boosted_early_stopping_rounds = 20,
     n_weak_models=5
     )
