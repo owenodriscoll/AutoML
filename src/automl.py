@@ -1,10 +1,10 @@
 from __future__ import annotations
-import optuna
-import joblib
-import os, sys
+import os
+import sys
 import pickle
 import random
-import shap
+import optuna
+import joblib
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
@@ -21,15 +21,18 @@ from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
-    TransformerChooser, CategoricalChooser, FourrierExpansion
+    TransformerChooser, CategoricalChooser#, FourrierExpansion
 from .function_helper import FuncHelper
 
-# try polynomial features with interactions_only = True, include_bias = False
-# add option to overwrite study instead of only coninuing previous available studies
-# add time constraint to reloading
-# boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
-# several classification models accept class weights, implement class weight support
-# !!! add encoding for clustering of feature importance 
+# --------------- TODO LIST ---------------
+# FIXME add encoding for clustering of feature importance 
+
+# TODO try polynomial features with interactions_only = True, include_bias = False
+# TODO add option to overwrite study instead of only coninuing previous available studies
+# TODO add time constraint to reloading
+# TODO boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
+# TODO several classification models accept class weights, implement class weight support
+
 
 @dataclass
 class AutomatedML:
@@ -70,8 +73,8 @@ class AutomatedML:
         The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
     spline_value: int, float, dict, optional (default=None)
         The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or 5
-    fourrier_value: int
-        fourrier_value
+    fourrier_value: int,
+        DEPRECIATED
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
@@ -384,7 +387,7 @@ class AutomatedML:
                 poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
                 # -- create fourrier expansion
-                fourrier = FourrierExpansion(fourrier_value=self.fourrier_value).fit()
+                # fourrier = FourrierExpansion(fourrier_value=self.fourrier_value).fit() # FIXME
 
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
@@ -416,7 +419,7 @@ class AutomatedML:
                     ('poly', poly),
                     ('spline', spline),
                     ('scaler', scaler),
-                    ('fourrier', fourrier),
+                    # ('fourrier', fourrier), # FIXME
                     ('pca', pca),
                     ('model', model_final)
                     ])
@@ -778,10 +781,21 @@ class AutomatedML:
 
         return
     
+
+    def apply(self):
+            self.model_hyperoptimise()
+            self.model_select_best()
+            self.model_evaluate()
+
+            return
+
+    
     def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
         """
-        DOES NOT WORK WITH NON-NUMERIC DATA
-        
+        NOTE DOES NOT WORK WITH NON-NUMERIC DATA
+        NOTE requires installation of the shap package
+            python3 -m pip install pyautoml[shap]
+
         Evaluates feature importance using shapely values. The SHAP kernel explainer is trained on 
         the training data (or on the cluster thereof). Then the explainer calculates for the test 
         data how parameters affect model performance.
@@ -804,6 +818,8 @@ class AutomatedML:
         
         
         """
+
+        import shap
         
         # -- reload the final model if it exists
         if type(self._model_final) is type(None):
@@ -844,38 +860,4 @@ class AutomatedML:
 
         return pd.DataFrame(data = shap_values, columns = feature_names), data
         
-    
-    def apply(self, stratify = None):
-        self.model_hyperoptimise()
-        self.model_select_best()
-        self.model_evaluate()
-
-        return
-
-
-
-# df_X.rename(columns={"0": "a", "1": "b", "2": "c", "3": "d", "4": "e", "5": "f", "6": "g", "7": "h", "8": "i", ""})
-
-# X_train_summary = regression.X_train.sample(100)
-    
-
-# # -- create explainer based on clustered training data
-# ex = FuncHelper.function_warning_catcher(shap.KernelExplainer, [regression._model_final.predict, X_train_summary],
-#                                     regression.warning_verbosity)
-
-# # -- select subset of test data 
-# data = regression.X_test.sample(n = 20, random_state = regression.random_state)
-# feature_names = list(regression.X_test.keys())
-
-# # -- calculate SHAP values
-# print('Calculating Shapely values...', flush=True)
-# shap_values = FuncHelper.function_warning_catcher(ex.shap_values, [data],
-#                                                   self.warning_verbosity)
-
-# # -- create summary plot
-# shap.summary_plot(shap_values, features = data, feature_names = feature_names)
-
-# # 
-# most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
-# shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
 

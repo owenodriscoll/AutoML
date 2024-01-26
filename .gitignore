@@ -1,5 +1,5 @@
 __pycache__
 examples/testdir*
 examples/test_examples*
-catboost_info/*
+catboost_info/
 .DS_Store

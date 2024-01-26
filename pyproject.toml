@@ -1,0 +1,33 @@
+[project]
+name = "pyautoml"
+dynamic = ["version"]
+authors = [
+  { name="Owen O'D"},
+]
+description = "Python package for automated hyperparameter-optimization of common machine-learning algorithms"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+
+dependencies = [
+  "catboost",
+  "xgboost"
+  "lightgbm"
+  "optuna"
+  "scikit-learn"
+  "numpy"
+  "pandas"
+  "SQLAlchemy"
+  
+]
+
+[project.optional-dependencies]
+  shap = ["shap"]
+
+[project.urls]
+Homepage = "https://github.com/owenodriscoll/AutoML"
