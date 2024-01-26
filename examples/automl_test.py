@@ -10,7 +10,7 @@ from AutoML import AutomatedRegression, AutomatedClassification
 
 #%% Regression
 
-X, y = make_regression(n_samples=1000, n_features=10, n_informative=5, random_state=42)
+X, y = make_regression(n_samples=100000, n_features=10, n_informative=5, random_state=42)
 
 
 df_X = pd.DataFrame(X)
@@ -40,8 +40,13 @@ regression = AutomatedRegression(
     n_weak_models=5
     )
 
+import time
+
+start = time.time()
 regression.apply()
-regression.summary
+end = time.time()
+print(end - start)
+# regression.summary
 
 # regression.model_select_best()
 # regression.model_evaluate()
