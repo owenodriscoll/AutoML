@@ -1,5 +1,5 @@
-from .automl import AutomatedML
-from .regressors import regressor_selector
+from . import AutomatedML
+from . import regressor_selector
 from dataclasses import dataclass
 from typing import Callable, List
 from sklearn.metrics import median_absolute_error, r2_score
