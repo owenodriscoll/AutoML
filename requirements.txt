@@ -7,3 +7,4 @@ numpy==1.26.3
 lightgbm==4.1.0
 pandas==2.2.0
 catboost==1.2.2
+# optional shap==0.44.1

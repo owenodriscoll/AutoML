@@ -2,15 +2,15 @@ import pandas as pd
 from sklearn.datasets import make_regression, make_classification
 from sklearn.metrics import r2_score, accuracy_score, precision_score
 # If AutoML is not installed, uncomment below to lines to allow for correct import
-# import os
+import os
 # os.chdir("..")
-from AutoML import AutomatedRegression, AutomatedClassification
+from automl import AutomatedRegression, AutomatedClassification
 
 # %reset -f
 
 #%% Regression
 
-X, y = make_regression(n_samples=100000, n_features=10, n_informative=5, random_state=42)
+X, y = make_regression(n_samples=1000, n_features=10, n_informative=5, random_state=42)
 
 
 df_X = pd.DataFrame(X)
@@ -31,7 +31,7 @@ regression = AutomatedRegression(
     ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=False,
-    write_folder=f'{os.path.dirname(__file__)}/testdir',
+    write_folder=f'{os.path.dirname(__file__)}/testdir/to_delete',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
     models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars', 'xgboost', 'catboost'],
@@ -52,7 +52,7 @@ print(end - start)
 # regression.model_evaluate()
 
 #%% Classification
-
+import numpy as np
 
 X, y = make_classification(
     n_samples=1000, n_features=15, n_redundant=0, n_informative=10, random_state=42, n_classes = 3, n_clusters_per_class=1
@@ -63,13 +63,13 @@ classification = AutomatedClassification(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=30,
+    n_trial=26,
     # nominal_columns=['nine'],
     # ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=True,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_classification0',
-    metric_assess=[lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')],
+    write_folder=f'{os.path.dirname(__file__)}/testdir/to_delete2',
+    metric_assess=[lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro', zero_division=np.nan)],
     optimisation_direction='maximize',
     models_to_optimize=['sgd', 'lightgbm', 'svc'],
     models_to_assess=[ 'svc', 'lightgbm','sgd'],
@@ -82,3 +82,4 @@ classification.summary
 
 
 # adapt metrics to classification to apply per class, weighted, binary etc, maybe using scorer
+# %%
