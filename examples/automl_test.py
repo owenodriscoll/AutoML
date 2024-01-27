@@ -1,7 +1,10 @@
 import pandas as pd
 from sklearn.datasets import make_regression, make_classification
 from sklearn.metrics import r2_score, accuracy_score, precision_score
-from AutoML.AutoML import AutomatedRegression, AutomatedClassification
+# If AutoML is not installed, uncomment below to lines to allow for correct import
+import os
+# os.chdir("..")
+from automl import AutomatedRegression, AutomatedClassification
 
 # %reset -f
 
@@ -23,28 +26,33 @@ regression = AutomatedRegression(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=2,
+    n_trial=10,
     nominal_columns=['nine'],
     ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=False,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_regression4',
+    write_folder=f'{os.path.dirname(__file__)}/testdir/to_delete',
     metric_optimise=r2_score,
     optimisation_direction='maximize',
-    models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars'],
-    models_to_assess=[ 'lassolars', 'lightgbm','bayesianridge'],
+    models_to_optimize=['bayesianridge', 'lightgbm', 'lassolars', 'xgboost', 'catboost'],
+    models_to_assess=[ 'lassolars', 'lightgbm','bayesianridge', 'xgboost', 'catboost'],
     boosted_early_stopping_rounds = 20,
     n_weak_models=5
     )
 
-# regression.apply()
+import time
+
+start = time.time()
+regression.apply()
+end = time.time()
+print(end - start)
 # regression.summary
 
-regression.model_select_best()
-regression.model_evaluate()
+# regression.model_select_best()
+# regression.model_evaluate()
 
 #%% Classification
-
+import numpy as np
 
 X, y = make_classification(
     n_samples=1000, n_features=15, n_redundant=0, n_informative=10, random_state=42, n_classes = 3, n_clusters_per_class=1
@@ -55,13 +63,13 @@ classification = AutomatedClassification(
     # pca_value=0.95,
     # spline_value= 2,
     # poly_value={'degree': 2, 'interaction_only': True},
-    n_trial=30,
+    n_trial=26,
     # nominal_columns=['nine'],
     # ordinal_columns=['ten'],
     reload_study=True,
     reload_trial_cap=True,
-    write_folder='/export/home/owen/Documents/scripts/AutoML/tests/auto_classification0',
-    metric_assess=[lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro')],
+    write_folder=f'{os.path.dirname(__file__)}/testdir/to_delete2',
+    metric_assess=[lambda y_pred, y_true: precision_score(y_pred, y_true, average = 'macro', zero_division=np.nan)],
     optimisation_direction='maximize',
     models_to_optimize=['sgd', 'lightgbm', 'svc'],
     models_to_assess=[ 'svc', 'lightgbm','sgd'],
@@ -74,3 +82,4 @@ classification.summary
 
 
 # adapt metrics to classification to apply per class, weighted, binary etc, maybe using scorer
+# %%

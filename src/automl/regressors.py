@@ -174,7 +174,7 @@ def bayesianridge_loader():
     
     def bayesianRidgeHParams(trial):
         param_dict = {}
-        param_dict['n_iter'] = trial.suggest_int("n_iter", 10, 400)
+        param_dict['max_iter'] = trial.suggest_int("max_iter", 10, 400)
         param_dict['tol'] = trial.suggest_float("tol", 1e-8, 1e2)
         param_dict['alpha_1'] =  trial.suggest_float("alpha_1", 1e-8, 1e2, log = True)
         param_dict['alpha_2'] = trial.suggest_float("alpha_2", 1e-8, 1e2, log = True)

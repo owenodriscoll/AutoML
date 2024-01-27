@@ -293,6 +293,7 @@ def svc_loader(random_state):
     def svcHParams(trial):
         param_dict = {}
         param_dict['loss'] = trial.suggest_categorical("loss", ['hinge', 'squared_hinge'])
+        param_dict['dual'] = trial.suggest_categorical("dual", ['auto'])
         
         param_dict['penalty'] = trial.suggest_categorical("penalty", ['l2'])
         # loss penalty='l1' and loss='hinge' is not supported

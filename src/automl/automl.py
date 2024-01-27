@@ -1,9 +1,10 @@
 from __future__ import annotations
-import optuna
-import joblib
-import os, sys
+import os
+import sys
 import pickle
 import random
+import optuna
+import joblib
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
@@ -11,21 +12,27 @@ from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 from sklearn.model_selection import KFold
+from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
+from sklearn.cluster import KMeans
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
-from sklearn.linear_model import Ridge, RidgeClassifier
+from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
-    TransformerChooser, CategoricalChooser
-from .function_helper import FuncHelper
+    TransformerChooser, CategoricalChooser#, FourrierExpansion
+from misc.function_helper import FuncHelper
 
-# try polynomial features with interactions_only = True, include_bias = False
-# add option to overwrite study instead of only coninuing previous available studies
-# add time constraint to reloading
-# boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
-# several classification models accept class weights, implement class weight support
+# --------------- TODO LIST ---------------
+# FIXME add encoding for clustering of feature importance 
+
+# TODO try polynomial features with interactions_only = True, include_bias = False
+# TODO add option to overwrite study instead of only coninuing previous available studies
+# TODO add time constraint to reloading
+# TODO boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
+# TODO several classification models accept class weights, implement class weight support
+
 
 @dataclass
 class AutomatedML:
@@ -44,6 +51,18 @@ class AutomatedML:
         Timeout in seconds for optimization of hyperparameters.
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
+    n_weak_models: int, optional (default=0)
+        Number of models to train stacked model on in addition to best model. For each specified
+        model the best performing and randomly selected n_weak_models are used for stacking.
+        E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
+        in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
+        to include (unique) additional information from the additional models, despite them performing worse
+        independly than the best model
+    n_jobs: int, optional (default=1)
+        number of simoultaneous threads to run optimisation on. Not recommended to choose values greater than
+        number of CPU cores. Simoultaneous threads can result in asynchronous optimisation, e.g. Trial 10
+        may complete before Trial 4 and therefore Trial 10 cannot incorporate information of Trial 4 in the
+        selection of its hyperparameters.         
     cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
         The cross-validation object to use for evaluation of models.
     sampler: callable, optional (default=TPESampler with seed=random_state)
@@ -54,41 +73,38 @@ class AutomatedML:
         The polynomial transformation to apply to the data, if any. E.g. {'degree': 2, 'interaction_only'= False} or 2
     spline_value: int, float, dict, optional (default=None)
         The spline transformation to apply to the data, if any. {'n_knots': 5, 'degree':3} or 5
+    fourrier_value: int,
+        DEPRECIATED
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
-        The metric to use for optimization of hyperparameters.
+        The metric to use for optimization of hyperparameters. 
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
         The metrics to use for assessment of models.
     optimisation_direction: str, optional (default='minimize')
         The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
     write_folder: str, optional (default='/AUTOML/' in the current working directory)
         The folder where to write the results and models.
-    reload_study: bool, optional (default=True)
-            Whether to continue study if previous study exists in write_folder.
-    reload_trial_cap:
-            Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded
-            study already performed 40 trials, the new study will at most perform 10 additional trials
+    reload_study: bool, optional (default=False)
+        Whether to continue study if previous study exists in write_folder.
+    reload_trial_cap: bool, optional (default=False)
+        Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded
+        study already performed 40 trials, the new study will at most perform 10 additional trials
     models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
         The list of names of models to optimize, varies depending on whether objective is regression or classification.
         Check documentation of AutomatedML children classes for details
     models_to_assess: list of str, optional (default=None)
         The list of names of models to assess. If None, uses the same as `list_optimise`.
-    n_weak_models:
-            Number of models to train stacked model on in addition to best model. For each specified
-            model the best performing and randomly selected n_weak_models models are used for stacking.
-            E.g. if n_weak_models = 2 for 'lightgbm', the best performing 'lightgbm' model is used for stacking
-            in addition to 2 other 'lightgbm' models. Setting this parameter to non-zero allows the stacked model
-            to include (unique) additional information from the additional models, despite them performing worse
-            independly than the best model
-    boosted_early_stopping_rounds:
+    boosted_early_stopping_rounds: int, optional (default=None)
         Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
-            less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
-            per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
-    nominal_columns:
-        !!!!
-    ordinal_columns:
-        !!!!
+        less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
+        per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
+    nominal_columns: list of Union[int, float, string)]
+        Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
+        Nominal columns contain unranked categories e.g. classes of weather type
+    ordinal_columns: list of Union[int, float, string)]
+        Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
+        Ordinal columns contain ranked categories e.g. hours of the day
     fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
         The list of fractions of the data to use for fitting the models.
     random_state: int
@@ -109,10 +125,14 @@ class AutomatedML:
         attribute and store them in the estimators attribute of the class instance.
 
     model_evaluate:
+        Evaluates performance of selected models. I first trains the models on the training dataset and
+        then stacks the models and assesses performance on test fraction of dataset. 
+        
+    model_feature_importance:
+        Explains feature importance of stacked model using SHAP.  
 
     apply:
-        applies in correct order 'model_hyperoptimize', 'model_select_best' and
-        'model_evaluate' methods.
+        applies in correct order 'model_hyperoptimize', 'model_select_best' and 'model_evaluate' methods.
 
     Returns
     -------
@@ -126,12 +146,14 @@ class AutomatedML:
     timeout: int = 600
     n_trial: int = 100
     n_weak_models: int = 0
+    n_jobs: int = 1
     cross_validation: callable = None
     sampler: callable = None
     pruner: callable = None
     poly_value: Union[int, float, dict, type(None)] = None
     spline_value: Union[int, float, dict, type(None)] = None
     pca_value: Union[int, float, dict, type(None)] = None
+    fourrier_value: int = None
     metric_optimise: Callable = None
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
@@ -160,6 +182,7 @@ class AutomatedML:
     _ml_objective: str = None
     _shuffle: bool = True
     _stratify: pd.DataFrame = None
+    _model_final = None
 
 
     # -- conditionally mutate __init__ and call initialization functions
@@ -220,7 +243,7 @@ class AutomatedML:
         self.X.columns = self.X.columns.astype(str)
 
         # -- find and warn if non-numeric columns match
-        non_numeric_columns = (~self.X.applymap(np.isreal).any(axis = 0))
+        non_numeric_columns = (~self.X.map(np.isreal).any(axis = 0))
         non_numeric_column_names = non_numeric_columns.index[non_numeric_columns].to_list()
 
         if type(self.nominal_columns) == type(self.ordinal_columns) == list:
@@ -329,7 +352,7 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout, catch=catch)
+                                      n_trials=n_trials, timeout=self.timeout, catch=catch, n_jobs=self.n_jobs)
 
             return
 
@@ -363,6 +386,9 @@ class AutomatedML:
                 spline = SplineChooser(spline_value=spline_input, trial=trial).fit_report_trial()
                 poly = PolyChooser(poly_value=poly_input, trial=trial).fit_report_trial()
 
+                # -- create fourrier expansion
+                # fourrier = FourrierExpansion(fourrier_value=self.fourrier_value).fit() # FIXME
+
                 # -- Instantiate PCA compression
                 pca = PcaChooser(pca_value=self.pca_value, trial=trial).fit_report_trial()
 
@@ -393,6 +419,7 @@ class AutomatedML:
                     ('poly', poly),
                     ('spline', spline),
                     ('scaler', scaler),
+                    # ('fourrier', fourrier), # FIXME
                     ('pca', pca),
                     ('model', model_final)
                     ])
@@ -458,9 +485,9 @@ class AutomatedML:
 
                     # -- determine if model is  boosted model
                     early_stopping_permitted = bool(
-                        set([model_name]) & set(['lightgbm', 'xgboost', 'catboost']))
+                        set([model_name]) & set(['xgboost', 'catboost'])) # TODO add early stopping for LightGBM using a callback
 
-                    if early_stopping_permitted:
+                    if early_stopping_permitted: 
                         # -- During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during
                         # the last step of the pipeline. Therefore we must first apply all previous
@@ -530,7 +557,7 @@ class AutomatedML:
         if bool(self._models_optimize):
             _optimise()
 
-            return self
+            return 
 
     def model_select_best(self, random_state_model_selection=None) -> AutomatedML:
         """
@@ -639,7 +666,7 @@ class AutomatedML:
         self.estimators = estimators
         self.list_all_models_assess = [estimator[0] for estimator in estimators]
 
-        return self
+        return
 
 
     def model_evaluate(self) -> AutomatedML:
@@ -675,21 +702,33 @@ class AutomatedML:
             if i == len(self.estimators):
                 estimator_temp = self.estimators
 
+                # -- create a scorer compatible with Cross Validated Ridge
+                greater_is_better = self.optimisation_direction == 'maximize'
+                scoring = make_scorer(
+                    self.metric_optimise, 
+                    greater_is_better = greater_is_better
+                    )
+
                 # -- fit stacked model while catching warnings
                 if self._ml_objective == 'regression':
-                    model_final = StackingRegressor(estimators=estimator_temp,
-                                                        final_estimator=Ridge(random_state=self.random_state),
-                                                        cv=self.cross_validation)
-                elif self._ml_objective == 'classification':
-                    model_final = StackingClassifier(estimators=estimator_temp,
-                                                        final_estimator=RidgeClassifier(random_state=self.random_state),
-                                                        cv=self.cross_validation)
+                    self._model_final = StackingRegressor(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
 
-                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                elif self._ml_objective == 'classification':
+                    self._model_final = StackingClassifier(
+                        estimators=estimator_temp,
+                        final_estimator=RidgeClassifierCV(scoring=scoring),
+                        cv=self.cross_validation
+                        )
+
+                FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
 
                 # -- predict on the whole testing dataset
-                self.y_pred = model_final.predict(self.X_test)
+                self.y_pred = self._model_final.predict(self.X_test)
 
                 # -- store stacked model, if file already exists, confirm overwrite
                 write_file_stacked_model = self.write_folder + "stacked_model.joblib"
@@ -700,7 +739,7 @@ class AutomatedML:
 
                     if user_input != 'n':
                         response = "Stacked model overwritten"
-                        joblib.dump(model_final, write_file_stacked_model)
+                        joblib.dump(self._model_final, write_file_stacked_model)
                     else:
                         response = "Stacked model not saved"
 
@@ -708,12 +747,13 @@ class AutomatedML:
 
                 # -- if file doesn't exist, write it
                 if not os.path.isfile(write_file_stacked_model):
-                    joblib.dump(model_final, write_file_stacked_model)
+                    joblib.dump(self._model_final, write_file_stacked_model)
 
             else:
-                model_final = estimator_temp[0][1]
-                FuncHelper.function_warning_catcher(model_final.fit, [self.X_train, self.y_train],
+                self._model_final = estimator_temp[0][1]
+                FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
+                
 
             # -- create dictionary with elements per metric allowing per metric fold performance to be stored
             metric_performance_dict = dict(
@@ -725,7 +765,7 @@ class AutomatedML:
                 fold_test = fold[1]
 
                 # -- Predict on the TEST data fold
-                prediction = model_final.predict(self.X_test.iloc[fold_test, :])
+                prediction = self._model_final.predict(self.X_test.iloc[fold_test, :])
 
                 # -- Assess prediction per metric and store per-fold performance in dictionary
                 [metric_performance_dict[key][1].append(
@@ -739,11 +779,85 @@ class AutomatedML:
 
             self.summary = summary
 
-        return self
+        return
+    
 
-    def apply(self, stratify = None):
-        self.model_hyperoptimise()
-        self.model_select_best()
-        self.model_evaluate()
+    def apply(self):
+            self.model_hyperoptimise()
+            self.model_select_best()
+            self.model_evaluate()
 
-        #return self
+            return
+
+    
+    def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
+        """
+        NOTE DOES NOT WORK WITH NON-NUMERIC DATA
+        NOTE requires installation of the shap package
+            python3 -m pip install pyautoml[shap]
+
+        Evaluates feature importance using shapely values. The SHAP kernel explainer is trained on 
+        the training data (or on the cluster thereof). Then the explainer calculates for the test 
+        data how parameters affect model performance.
+
+        Parameters
+        ----------
+        n_train_points: int, default=200
+            number of training observations (or clusters) for to use in explaining the model
+        n_test_points: int, default=200
+            number of test observations for which to assess feature importance
+        cluster: bool, default=True
+            whether to cluster the training data. If not individual points are chosen to create explainer 
+            
+        Returns
+        -------
+        shap_values:
+            Shapely values calculated for data
+        data:
+            Subset of test data on which shapely values are calculated
+        
+        
+        """
+
+        import shap
+        
+        # -- reload the final model if it exists
+        if type(self._model_final) is type(None):
+            try:
+                self._model_final = joblib.load(f"{self.write_folder}stacked_model.joblib")
+            except:
+                raise Exception(f"No trained model available in write_folder: {self.write_folder}")
+
+        # -- cluster the training data to speed up, otherwise randomly sample training data
+        if cluster:
+            print('Clustering...')
+            kmeans = KMeans(n_clusters = n_train_points, n_init = 10).fit(self.X_train)
+            X_train_summary = kmeans.cluster_centers_
+            
+        else:
+            X_train_summary = self.X_train.sample(n = n_train_points, random_state = self.random_state)
+            
+        
+        # -- create explainer based on clustered training data
+        ex = FuncHelper.function_warning_catcher(shap.KernelExplainer, [self._model_final.predict, X_train_summary],
+                                            self.warning_verbosity)
+        
+        # -- select subset of test data 
+        data = self.X_test.sample(n = n_test_points, random_state = self.random_state)
+        feature_names = list(self.X_test.keys())
+
+        # -- calculate SHAP values
+        print('Calculating Shapely values...', flush=True)
+        shap_values = FuncHelper.function_warning_catcher(ex.shap_values, [data],
+                                                          self.warning_verbosity)
+
+        # -- create summary plot
+        shap.summary_plot(shap_values, features = data, feature_names = feature_names)
+        
+        # 
+        # most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
+        # shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
+
+        return pd.DataFrame(data = shap_values, columns = feature_names), data
+        
+
