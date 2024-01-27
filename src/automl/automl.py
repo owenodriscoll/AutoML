@@ -22,7 +22,7 @@ from sklearn.model_selection import train_test_split
 
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
-from ..misc.function_helper import FuncHelper
+from misc.function_helper import FuncHelper
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 

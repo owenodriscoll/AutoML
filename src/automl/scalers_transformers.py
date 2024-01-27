@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from typing import Union
-from ..misc.function_helper import FuncHelper
+from misc.function_helper import FuncHelper
 
 
 def decorator_report(variable, to_return_self: bool = False):
