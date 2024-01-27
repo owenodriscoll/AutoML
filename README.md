@@ -1,10 +1,10 @@
-# AutoML: Automated Machine Learning
+# automl: Automated Machine Learning
 ## Intro
-AutoML is a python project focussed on automating much of the machine learning efforts encountered in zero-dimensional regression and classification (and thus not multidimensional data such as for a CNN). It relies on existing Python packages Sci-Kit Learn, Optuna and model specific packages LightGBM, CatBoost and XGBoost.
+automl is a python project focussed on automating much of the machine learning efforts encountered in zero-dimensional regression and classification (and thus not multidimensional data such as for a CNN). It relies on existing Python packages Sci-Kit Learn, Optuna and model specific packages LightGBM, CatBoost and XGBoost.
 
-AutoML works by assessing the performance of various machine-learning models for a set number of trials over a pre-defined range of hyperparameters. During succesive trials the hyperparameters are optimized following a user-defined methodology (the default optimisation uses Bayesian search). Unpromising trials are stopped (pruned) early by assessing performance on an incrementally increasing fraction of training data, saving computational resources. Hyperparameter optimization trials are stored locally on disk, allowing the training to be picked up after interuption. The best trials of the defined models are reloaded and combined, or stacked, to form a final model. This final model is assessed and, due to the nature of stacking, tends to outperform any of its constituting models.
+automl works by assessing the performance of various machine-learning models for a set number of trials over a pre-defined range of hyperparameters. During succesive trials the hyperparameters are optimized following a user-defined methodology (the default optimisation uses Bayesian search). Unpromising trials are stopped (pruned) early by assessing performance on an incrementally increasing fraction of training data, saving computational resources. Hyperparameter optimization trials are stored locally on disk, allowing the training to be picked up after interuption. The best trials of the defined models are reloaded and combined, or stacked, to form a final model. This final model is assessed and, due to the nature of stacking, tends to outperform any of its constituting models.
 
-AutoML contains several additional functionalities beyond the hyperoptimization and stacking of models: 
+automl contains several additional functionalities beyond the hyperoptimization and stacking of models: 
 * scaling of the input `X`-matrix (tested for on default)
 * normal transformation of the `y`-matrix (tested for on default)
 * PCA compression
@@ -12,6 +12,8 @@ AutoML contains several additional functionalities beyond the hyperoptimization 
 * polynomial expansion
 * categorical feature support (nominal and ordinal)
 * bagging of weak models in addition to optimized models
+* multithreading
+* feature-importance analyses with `shap`
 
 
 ## Setup
