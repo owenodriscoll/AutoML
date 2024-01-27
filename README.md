@@ -15,7 +15,28 @@ AutoML contains several additional functionalities beyond the hyperoptimization 
 
 
 ## Setup
-### Method 1: cloning
+### Method 1: pip install
+Create a new environment to prevent pip install from breaking anything. Include a Python version 3.11
+```
+conda create -n ENVNAME -c conda-forge python=3.11
+```
+
+Activate new environment
+```
+conda activate ENVNAME
+```
+
+Pip install 
+```
+python3 -m pip install py-automl-lib
+```
+
+Optionally include the `shap` package for feature-importance analyses (see `example_notebook.ipynb` chapter 7.)
+```
+python3 -m pip install py-automl-lib[shap]
+```
+
+### Method 2: cloning
 Clone the repository
 ```
 git clone https://github.com/owenodriscoll/AutoML
@@ -37,31 +58,16 @@ pip install git+https://github.com/owenodriscoll/AutoML.git
 ```
 
 
-### Method 2: pip install
-Create a new environment to prevent pip install from breaking anything. Include a specific Python version
-```
-conda create -n ENVNAME -c conda-forge python=3.9.12
-```
-
-Activate new environment
-```
-conda activate ENVNAME
-```
-
-Pip install from GitHub including dependencies in requirements.text
-```
-pip install git+https://github.com/owenodriscoll/AutoML.git@main#egg=AutoML -r https://raw.githubusercontent.com/owenodriscoll/AutoML/main/requirements.txt
-```
 
 
 ## Use
 
-For a more detailed example checkout `AutoML_example.ipynb`
+For a more detailed example checkout `examples/example_notebook.ipynb`
 
 Minimal use case regression:
 ```python
 from sklearn.metrics import r2_score
-from AutoML import AutomatedRegression
+from automl import AutomatedRegression
 
 X, y = make_regression(n_samples=1000, n_features=10, n_informative=2, random_state=42)
 
@@ -85,7 +91,7 @@ from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
 from sklearn.metrics import r2_score
 from sklearn.model_selection import KFold
-from AutoML import AutomatedRegression
+from automl import AutomatedRegression
 
 X, y = make_regression(n_samples=1000, n_features=10, n_informative=2, random_state=42)
 
