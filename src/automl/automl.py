@@ -559,7 +559,7 @@ class AutomatedML:
 
             return 
 
-    def model_select_best(self, random_state_model_selection=None) -> AutomatedML:
+    def model_select_best(self, random_state_model_selection: int = None, performance_sign_positive: bool = True) -> AutomatedML:
         """
         This method is used to create estimator pipelines for all the models specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
@@ -569,6 +569,13 @@ class AutomatedML:
         and TransformerChooser classes using the best parameters obtained from the study result. Next, it creates a
         pipeline using the Pipeline class from scikit-learn library. Each pipeline per model is added to a list of
         pipelines, which is then assigned to the estimators attribute of the class instance.
+
+        Parameters
+        ----------
+        random_state_model_selection: int, None
+            integer used to set the random state for random weak model selection
+        performance_sign_positive: bool, True
+            boolean used to indicate whether performance values should be positive or negative only 
 
         Returns
         -------
@@ -580,9 +587,10 @@ class AutomatedML:
         for model_name in list(self._models_assess.keys()):
 
             # -- set randomness parameters for randomly selecting models (if self.n_weak_models > 0)
-            if type(random_state_model_selection) == type(None):
-                random_state_model_selection = self.random_state
-            random.seed(random_state_model_selection)
+            if random_state_model_selection == None:
+                random.seed(self.random_state)
+            else:
+                random.seed(random_state_model_selection)
 
             # -- reload relevant study. Sampler not reloaded here as no additional studies are performed
             study = optuna.create_study(
@@ -599,7 +607,17 @@ class AutomatedML:
 
             # -- select all trials associated with model
             df_trials = study.trials_dataframe()
-            df_trials_non_pruned = df_trials[df_trials.state == 'COMPLETE']
+
+            # -- remove trials returning NaN's or undesired_sign
+            if performance_sign_positive:
+                error_sign_condition = (df_trials.value >= 0)
+            else: 
+                error_sign_condition = (df_trials.value <= 0)
+
+            df_trials_non_pruned = df_trials[((df_trials.state == 'COMPLETE') | 
+                                                (df_trials.state == 'PRUNED')) & 
+                                                (np.isfinite(df_trials.value)) & 
+                                                (error_sign_condition) ]
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
@@ -622,6 +640,10 @@ class AutomatedML:
             idx_remaining = df_trials_non_pruned.number.values.tolist()
             idx_remaining.remove(idx_best)
             idx_models = [idx_best] + random.sample(idx_remaining, n_weak_models)
+
+            # -- reset random state to pre-sampling state 
+            if random_state_model_selection == None:
+                random.seed(self.random_state)
 
             # -- name best and weaker models
             selected_models = [model_name+'_best']  + [model_name+'_'+str(i) for i in idx_models[1:]]
@@ -783,6 +805,18 @@ class AutomatedML:
     
 
     def apply(self):
+            """
+            Summary method that runs in sequence the following methods:
+
+            ```python
+            self.model_hyperoptimise()
+            self.model_select_best()
+            self.model_evaluate()
+            ```
+
+            These can also be called manually, for instance to skip an already performed hyperopimisation
+            """
+
             self.model_hyperoptimise()
             self.model_select_best()
             self.model_evaluate()
@@ -792,9 +826,9 @@ class AutomatedML:
     
     def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
         """
-        NOTE DOES NOT WORK WITH NON-NUMERIC DATA
-        NOTE requires installation of the shap package
-            python3 -m pip install pyautoml[shap]
+        NOTE DOES NOT WORK WITH NON-NUMERIC DATA \n
+        NOTE requires installation of the shap package \n
+            `python3 -m pip install py-automl-lib[shap]`
 
         Evaluates feature importance using shapely values. The SHAP kernel explainer is trained on 
         the training data (or on the cluster thereof). Then the explainer calculates for the test 
