@@ -7,6 +7,7 @@ import optuna
 import joblib
 import pandas as pd
 import numpy as np
+import timeout_decorator
 from dataclasses import dataclass
 from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
@@ -47,8 +48,10 @@ class AutomatedML:
         Features of shape (n_samples, n_features).
     test_frac: float, optional (default=0.2)
         Fraction of the data to use as test data.
-    timeout: int, optional (default=600)
-        Timeout in seconds for optimization of hyperparameters.
+    timeout_study: int, optional (default=600)
+        Timeout in seconds for optimization of hyperparameters of entire study. Only checked after each trial.
+    timeout_trial: int, optional (default=600)
+        Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
     n_weak_models: int, optional (default=0)
@@ -143,7 +146,8 @@ class AutomatedML:
     y: pd.DataFrame
     X: pd.DataFrame
     test_frac: float = 0.2
-    timeout: int = 600
+    timeout_study: int = 600
+    timeout_trial: int = 10
     n_trial: int = 100
     n_weak_models: int = 0
     n_jobs: int = 1
@@ -352,7 +356,7 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout, catch=catch, n_jobs=self.n_jobs)
+                                      n_trials=n_trials, timeout=self.timeout_study, catch=catch, n_jobs=self.n_jobs)
 
             return
 
@@ -366,6 +370,7 @@ class AutomatedML:
             the estimator algorithm and creates the model.
             """
 
+            
             def _objective(trial):
                 # -- Instantiate scaler for independents
                 scaler = ScalerChooser(trial=trial).suggest_fit()
@@ -431,8 +436,14 @@ class AutomatedML:
                     pickle.dump(study.sampler, sampler_state)
 
                 return performance
+            
+            # -- here we wrap a timeout decorator which only works when multithreading is NOT used
+            if self.n_jobs==1:
+                wrapped_objective=timeout_decorator.timeout(self.timeout_trial, timeout_exception=optuna.TrialPruned, use_signals=True)(_objective)
+            else:
+                wrapped_objective=_objective
 
-            return _objective
+            return wrapped_objective
 
         def _model_performance(trial, model_name, pipeline) -> float:
             """

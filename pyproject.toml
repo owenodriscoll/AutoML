@@ -23,7 +23,7 @@ dependencies = [
   "numpy",
   "pandas",
   "SQLAlchemy",
-  
+  "timeout-decorator",
 ]
 
 [project.optional-dependencies]
