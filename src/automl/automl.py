@@ -105,9 +105,10 @@ class AutomatedML:
     models_to_assess: list of str, optional (default=None)
         The list of names of models to assess. If None, uses the same as `list_optimise`.
     boosted_early_stopping_rounds: int, optional (default=None)
-        Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
-        less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
-        per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
+        Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Must be greater than 0.
+        Lower values may be faster but yield less complex (and therefore perhaps worse) tuned models. 
+        Higher values generally results in longer optimization time per model but more models pruned. 
+        Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost.
     nominal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
         Nominal columns contain unranked categories e.g. classes of weather type
@@ -410,8 +411,11 @@ class AutomatedML:
                 model_with_parameters = model().set_params(**param)
 
                 # -- add early stopping for models that support it
-                early_stopping_permitted = model_name in ['xgboost', 'catboost', 'lightgbm']
-                if early_stopping_permitted:
+                early_stopping_models = model_name in ['xgboost', 'catboost', 'lightgbm']
+                valid_early_stop_input = (isinstance(self.boosted_early_stopping_rounds, int)) & (self.boosted_early_stopping_rounds != 0)
+                self._early_stopping_permitted = early_stopping_models & valid_early_stop_input
+
+                if self._early_stopping_permitted:
                     model_with_parameters=model_with_parameters.set_params(early_stopping_rounds=self.boosted_early_stopping_rounds)
 
                 # -- ordinal and nominal encoding
@@ -506,10 +510,8 @@ class AutomatedML:
                     fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
                     fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
 
-                    # # -- determine if model is  boosted model
-                    early_stopping_permitted = model_name in ['xgboost', 'catboost', 'lightgbm']
-
-                    if early_stopping_permitted: 
+                    # -- determine if model is  boosted model
+                    if  self._early_stopping_permitted: 
                         # -- During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during
                         # the last step of the pipeline. Therefore we must first apply all previous
@@ -526,11 +528,10 @@ class AutomatedML:
                         # -- transform testing fold of training data
                         fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
 
-                        # -- fit complete pipeline using properly transformed testing fold
+                        # -- fit to data while giving evaluation dataset
                         pipeline.fit(fold_X_train_frac, fold_y_train_frac,
-                                      model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                    #   model__early_stopping_rounds = self.boosted_early_stopping_rounds # <-- outdated, nwo passed as parameter
-                                      )
+                                    model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
+                                    )
 
                     else:
                         # -- fit training data
