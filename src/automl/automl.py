@@ -31,6 +31,7 @@ from .utils.function_helper import FuncHelper
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
+# FIXME make timeout_trial compatible with catboost
 
 # TODO try polynomial features with interactions_only = True, include_bias = False
 # TODO add option to overwrite study instead of only coninuing previous available studies
@@ -56,6 +57,7 @@ class AutomatedML:
         Timeout in seconds for optimization of hyperparameters of entire study. Only checked after each trial.
     timeout_trial: int, optional (default=600)
         Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
+        NOTE! Does not work for Catboost
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
     n_weak_models: int, optional (default=0)
@@ -442,7 +444,8 @@ class AutomatedML:
                 return performance
             
             # -- here we wrap a timeout decorator which only works when multithreading is NOT used
-            if self.n_jobs==1:
+            # -- FIXME Does not work for catboost
+            if (self.n_jobs==1) & ('catboost' not in model_name):
                 wrapped_objective=timeout_decorator.timeout(self.timeout_trial, timeout_exception=optuna.TrialPruned, use_signals=True)(_objective)
             else:
                 wrapped_objective=_objective
