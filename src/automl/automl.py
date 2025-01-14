@@ -409,6 +409,11 @@ class AutomatedML:
                 # -- Create model
                 model_with_parameters = model().set_params(**param)
 
+                # -- add early stopping for models that support it
+                early_stopping_permitted = model_name in ['xgboost', 'catboost', 'lightgbm']
+                if early_stopping_permitted:
+                    model_with_parameters=model_with_parameters.set_params(early_stopping_rounds=self.boosted_early_stopping_rounds)
+
                 # -- ordinal and nominal encoding
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
 
@@ -501,9 +506,8 @@ class AutomatedML:
                     fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
                     fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
 
-                    # -- determine if model is  boosted model
-                    early_stopping_permitted = bool(
-                        set([model_name]) & set(['xgboost', 'catboost'])) # TODO add early stopping for LightGBM using a callback
+                    # # -- determine if model is  boosted model
+                    early_stopping_permitted = model_name in ['xgboost', 'catboost', 'lightgbm']
 
                     if early_stopping_permitted: 
                         # -- During early stopping we assess the training performance of the model per round
@@ -525,7 +529,8 @@ class AutomatedML:
                         # -- fit complete pipeline using properly transformed testing fold
                         pipeline.fit(fold_X_train_frac, fold_y_train_frac,
                                       model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                      model__early_stopping_rounds = self.boosted_early_stopping_rounds)
+                                    #   model__early_stopping_rounds = self.boosted_early_stopping_rounds # <-- outdated, nwo passed as parameter
+                                      )
 
                     else:
                         # -- fit training data
