@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
+
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 from sklearn.model_selection import KFold
 from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
