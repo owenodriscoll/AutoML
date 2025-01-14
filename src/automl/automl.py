@@ -637,10 +637,11 @@ class AutomatedML:
             else: 
                 error_sign_condition = (df_trials.value <= 0)
 
-            df_trials_non_pruned = df_trials[((df_trials.state == 'COMPLETE') | 
-                                                (df_trials.state == 'PRUNED')) & 
-                                                (np.isfinite(df_trials.value)) & 
-                                                (error_sign_condition) ]
+            df_trials_non_pruned = df_trials[
+                (df_trials.state == 'COMPLETE') & 
+                (np.isfinite(df_trials.value)) & 
+                (error_sign_condition) 
+                ]
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
