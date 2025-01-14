@@ -7,10 +7,15 @@ import optuna
 import joblib
 import pandas as pd
 import numpy as np
+import timeout_decorator
 from dataclasses import dataclass
 from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
+
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 from sklearn.model_selection import KFold
 from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
@@ -26,6 +31,7 @@ from .utils.function_helper import FuncHelper
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
+# FIXME make timeout_trial compatible with catboost
 
 # TODO try polynomial features with interactions_only = True, include_bias = False
 # TODO add option to overwrite study instead of only coninuing previous available studies
@@ -47,8 +53,11 @@ class AutomatedML:
         Features of shape (n_samples, n_features).
     test_frac: float, optional (default=0.2)
         Fraction of the data to use as test data.
-    timeout: int, optional (default=600)
-        Timeout in seconds for optimization of hyperparameters.
+    timeout_study: int, optional (default=600)
+        Timeout in seconds for optimization of hyperparameters of entire study. Only checked after each trial.
+    timeout_trial: int, optional (default=600)
+        Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
+        NOTE! Does not work for Catboost
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
     n_weak_models: int, optional (default=0)
@@ -96,9 +105,10 @@ class AutomatedML:
     models_to_assess: list of str, optional (default=None)
         The list of names of models to assess. If None, uses the same as `list_optimise`.
     boosted_early_stopping_rounds: int, optional (default=None)
-        Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Lower values may be faster but yield
-        less complex (and therefore perhaps worse) tuned models. Higher values generally results in longer optimization time
-        per model but more models pruned. Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost
+        Number of early stopping rounds for 'lightgbm', 'xgboost' and 'catboost'. Must be greater than 0.
+        Lower values may be faster but yield less complex (and therefore perhaps worse) tuned models. 
+        Higher values generally results in longer optimization time per model but more models pruned. 
+        Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost.
     nominal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
         Nominal columns contain unranked categories e.g. classes of weather type
@@ -143,7 +153,8 @@ class AutomatedML:
     y: pd.DataFrame
     X: pd.DataFrame
     test_frac: float = 0.2
-    timeout: int = 600
+    timeout_study: int = 600
+    timeout_trial: int = 10
     n_trial: int = 100
     n_weak_models: int = 0
     n_jobs: int = 1
@@ -352,7 +363,7 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout, catch=catch, n_jobs=self.n_jobs)
+                                      n_trials=n_trials, timeout=self.timeout_study, catch=catch, n_jobs=self.n_jobs)
 
             return
 
@@ -366,6 +377,7 @@ class AutomatedML:
             the estimator algorithm and creates the model.
             """
 
+            
             def _objective(trial):
                 # -- Instantiate scaler for independents
                 scaler = ScalerChooser(trial=trial).suggest_fit()
@@ -397,6 +409,14 @@ class AutomatedML:
 
                 # -- Create model
                 model_with_parameters = model().set_params(**param)
+
+                # -- add early stopping for models that support it
+                early_stopping_models = model_name in ['xgboost', 'catboost', 'lightgbm']
+                valid_early_stop_input = (isinstance(self.boosted_early_stopping_rounds, int)) & (self.boosted_early_stopping_rounds != 0)
+                self._early_stopping_permitted = early_stopping_models & valid_early_stop_input
+
+                if self._early_stopping_permitted:
+                    model_with_parameters=model_with_parameters.set_params(early_stopping_rounds=self.boosted_early_stopping_rounds)
 
                 # -- ordinal and nominal encoding
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
@@ -431,8 +451,15 @@ class AutomatedML:
                     pickle.dump(study.sampler, sampler_state)
 
                 return performance
+            
+            # -- here we wrap a timeout decorator which only works when multithreading is NOT used
+            # -- FIXME Does not work for catboost
+            if (self.n_jobs==1) & ('catboost' not in model_name):
+                wrapped_objective=timeout_decorator.timeout(self.timeout_trial, timeout_exception=optuna.TrialPruned, use_signals=True)(_objective)
+            else:
+                wrapped_objective=_objective
 
-            return _objective
+            return wrapped_objective
 
         def _model_performance(trial, model_name, pipeline) -> float:
             """
@@ -484,10 +511,7 @@ class AutomatedML:
                     fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
 
                     # -- determine if model is  boosted model
-                    early_stopping_permitted = bool(
-                        set([model_name]) & set(['xgboost', 'catboost'])) # TODO add early stopping for LightGBM using a callback
-
-                    if early_stopping_permitted: 
+                    if  self._early_stopping_permitted: 
                         # -- During early stopping we assess the training performance of the model per round
                         # on the test fold of the training dataset. The model testing is performed during
                         # the last step of the pipeline. Therefore we must first apply all previous
@@ -504,10 +528,10 @@ class AutomatedML:
                         # -- transform testing fold of training data
                         fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
 
-                        # -- fit complete pipeline using properly transformed testing fold
+                        # -- fit to data while giving evaluation dataset
                         pipeline.fit(fold_X_train_frac, fold_y_train_frac,
-                                      model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                      model__early_stopping_rounds = self.boosted_early_stopping_rounds)
+                                    model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
+                                    )
 
                     else:
                         # -- fit training data
@@ -614,10 +638,11 @@ class AutomatedML:
             else: 
                 error_sign_condition = (df_trials.value <= 0)
 
-            df_trials_non_pruned = df_trials[((df_trials.state == 'COMPLETE') | 
-                                                (df_trials.state == 'PRUNED')) & 
-                                                (np.isfinite(df_trials.value)) & 
-                                                (error_sign_condition) ]
+            df_trials_non_pruned = df_trials[
+                (df_trials.state == 'COMPLETE') & 
+                (np.isfinite(df_trials.value)) & 
+                (error_sign_condition) 
+                ]
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models

@@ -1,6 +1,6 @@
 [project]
 name = "py-automl-lib"
-version = "2.2.2"
+version = "2.2.3"
 authors = [
   { name="Owen O'D"},
 ]
@@ -17,13 +17,13 @@ classifiers = [
 dependencies = [
   "catboost",
   "xgboost",
-  "lightgbm==4.1.0",
+  "lightgbm",
   "optuna",
   "scikit-learn",
   "numpy",
   "pandas",
   "SQLAlchemy",
-  
+  "timeout-decorator",
 ]
 
 [project.optional-dependencies]
