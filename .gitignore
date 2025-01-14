@@ -3,5 +3,6 @@ examples/testdir*
 examples/test_examples*
 catboost_info/
 .DS_Store
-dist/
+dist/*
+dist_old/*
 *.egg-info
