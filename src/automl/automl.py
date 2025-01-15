@@ -154,7 +154,7 @@ class AutomatedML:
     X: pd.DataFrame
     test_frac: float = 0.2
     timeout_study: int = 600
-    timeout_trial: int = 10
+    timeout_trial: int = 120
     n_trial: int = 100
     n_weak_models: int = 0
     n_jobs: int = 1
