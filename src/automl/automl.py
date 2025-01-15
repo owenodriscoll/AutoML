@@ -161,9 +161,9 @@ class AutomatedML:
     cross_validation: callable = None
     sampler: callable = None
     pruner: callable = None
-    poly_value: Union[int, float, dict, type(None)] = None
-    spline_value: Union[int, float, dict, type(None)] = None
-    pca_value: Union[int, float, dict, type(None)] = None
+    poly_value: Union[int, float, dict, None] = None
+    spline_value: Union[int, float, dict, None] = None
+    pca_value: Union[int, float, dict, None] = None
     fourrier_value: int = None
     metric_optimise: Callable = None
     metric_assess: List[Callable] = None
@@ -173,10 +173,10 @@ class AutomatedML:
     reload_trial_cap: bool = False
     overwrite: bool = False
     boosted_early_stopping_rounds: int = None
-    nominal_columns: Union[List[str], type(None)] = None
-    ordinal_columns: Union[List[str], type(None)] = None
+    nominal_columns: Union[List[str], None] = None
+    ordinal_columns: Union[List[str], None] = None
     fit_frac: List[float] = None
-    random_state: Union[int, type(None)] = 42
+    random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
     X_train: pd.DataFrame = None
     X_test: pd.DataFrame = None
@@ -583,7 +583,7 @@ class AutomatedML:
 
             return 
 
-    def model_select_best(self, random_state_model_selection: int = None, performance_sign_positive: bool = True) -> AutomatedML:
+    def model_select_best(self, random_state_model_selection: int | None, performance_sign_positive: bool = True) -> AutomatedML:
         """
         This method is used to create estimator pipelines for all the models specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
