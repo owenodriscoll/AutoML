@@ -55,8 +55,10 @@ class AutomatedML:
         Fraction of the data to use as test data.
     timeout_study: int, optional (default=600)
         Timeout in seconds for optimization of hyperparameters of entire study. Only checked after each trial.
-    timeout_trial: int, optional (default=600)
+        Increase for more complex models.
+    timeout_trial: int, optional (default=120)
         Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
+        Increase for more complex models.
         NOTE! Does not work for Catboost
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
