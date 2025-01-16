@@ -18,9 +18,8 @@ automl contains several additional functionalities beyond the hyperoptimization 
 * feature-importance analyses with `shap`
 
 
-## Setup
-### Method 1: pip install
-Create a new environment to prevent pip install from breaking anything. Include a Python version 3.11
+## Installation
+Create a new environment to prevent pip install from breaking anything. Include Python version 3.11
 ```
 conda create -n ENVNAME -c conda-forge python=3.11
 ```
@@ -39,29 +38,6 @@ Optionally include the `shap` package for feature-importance analyses (see `exam
 ```
 python3 -m pip install py-automl-lib[shap]
 ```
-
-### Method 2: cloning
-Clone the repository
-```
-git clone https://github.com/owenodriscoll/AutoML
-```
-
-Navigate to the cloned local repository and create the conda environment with all requirement packages
-```
-conda env create --name ENVNAME --file environment.yml
-```
-
-Activate new environment
-```
-conda activate ENVNAME
-```
-
-Having created an environment with all dependencies, install AutoML:
-```
-pip install git+https://github.com/owenodriscoll/AutoML.git
-```
-
-
 
 
 ## Use
