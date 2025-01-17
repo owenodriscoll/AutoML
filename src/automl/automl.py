@@ -585,7 +585,7 @@ class AutomatedML:
 
             return 
 
-    def model_select_best(self, random_state_model_selection: int | None, performance_sign_positive: bool = True) -> AutomatedML:
+    def model_select_best(self, random_state_model_selection: int | None = None, performance_sign_positive: bool = True) -> AutomatedML:
         """
         This method is used to create estimator pipelines for all the models specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
