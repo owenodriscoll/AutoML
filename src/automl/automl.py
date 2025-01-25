@@ -123,6 +123,8 @@ class AutomatedML:
         The random seed to use, default is 42.
     warning_verbosity: str
         The warning verbosity to use, default is 'ignore'.
+    show_progress_bar: bool
+        Whether to show individual trial results or a progress bar. Defaults to False
 
     Methods
     -------
@@ -365,7 +367,11 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout_study, catch=catch, n_jobs=self.n_jobs)
+                               n_trials=n_trials, 
+                               timeout=self.timeout_study, 
+                               catch=catch, 
+                               n_jobs=self.n_jobs, 
+                               show_progress_bar=self.show_progress_bar)
 
             return
 
