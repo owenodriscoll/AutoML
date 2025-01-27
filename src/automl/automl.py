@@ -59,7 +59,7 @@ class AutomatedML:
     timeout_trial: int, optional (default=120)
         Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
         Increase for more complex models.
-        NOTE! Does not work for Catboost
+        NOTE! Does not work for Catboost or on Windows
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
     n_weak_models: int, optional (default=0)
@@ -123,6 +123,8 @@ class AutomatedML:
         The random seed to use, default is 42.
     warning_verbosity: str
         The warning verbosity to use, default is 'ignore'.
+    show_progress_bar: bool
+        Whether to show individual trial results or a progress bar. Defaults to False
 
     Methods
     -------
@@ -156,7 +158,7 @@ class AutomatedML:
     X: pd.DataFrame
     test_frac: float = 0.2
     timeout_study: int = 600
-    timeout_trial: int = 120
+    timeout_trial: int | None = None
     n_trial: int = 100
     n_weak_models: int = 0
     n_jobs: int = 1
@@ -180,6 +182,7 @@ class AutomatedML:
     fit_frac: List[float] = None
     random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
+    show_progress_bar: bool = False
     X_train: pd.DataFrame = None
     X_test: pd.DataFrame = None
     y_train: pd.DataFrame = None
@@ -196,6 +199,7 @@ class AutomatedML:
     _shuffle: bool = True
     _stratify: pd.DataFrame = None
     _model_final = None
+    _timeout_trial_default = 100
 
 
     # -- conditionally mutate __init__ and call initialization functions
@@ -214,6 +218,11 @@ class AutomatedML:
 
         self.create_dir()
         self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
+
+        if (self.timeout_trial is not None) & (os.name == 'nt'):
+            print("Warning: 'timeout_trial' is ineffective on Windows.")
+        elif (os.name == 'nt'):
+            self.timeout_trial = self._timeout_trial_default
 
 
     def create_dir(self):
@@ -365,7 +374,11 @@ class AutomatedML:
                     n_trials = self.n_trial
 
                 study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                                      n_trials=n_trials, timeout=self.timeout_study, catch=catch, n_jobs=self.n_jobs)
+                               n_trials=n_trials, 
+                               timeout=self.timeout_study, 
+                               catch=catch, 
+                               n_jobs=self.n_jobs, 
+                               show_progress_bar=self.show_progress_bar)
 
             return
 
@@ -455,8 +468,8 @@ class AutomatedML:
                 return performance
             
             # -- here we wrap a timeout decorator which only works when multithreading is NOT used
-            # -- FIXME Does not work for catboost
-            if (self.n_jobs==1) & ('catboost' not in model_name):
+            # -- FIXME Does not work for catboost or on Windows 
+            if (self.n_jobs==1) & ('catboost' not in model_name) & (os.name != 'nt'):
                 wrapped_objective=timeout_decorator.timeout(self.timeout_trial, timeout_exception=optuna.TrialPruned, use_signals=True)(_objective)
             else:
                 wrapped_objective=_objective
