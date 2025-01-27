@@ -59,7 +59,7 @@ class AutomatedML:
     timeout_trial: int, optional (default=120)
         Timeout in seconds for optimization of hyperparameters of a single trial. Only valid when n_jobs == 1
         Increase for more complex models.
-        NOTE! Does not work for Catboost
+        NOTE! Does not work for Catboost or on Windows
     n_trial: int, optional (default=100)
         Number of trials for optimization of hyperparameters.
     n_weak_models: int, optional (default=0)
