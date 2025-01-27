@@ -1,3 +1,6 @@
+# This file contains a frozen set of dependencies for a functioning environment.
+# Generated from pyproject.toml for py-automl-lib==2.2.2
+
 scikit-learn==1.4.0
 scipy==1.12.0
 SQLAlchemy==2.0.25
