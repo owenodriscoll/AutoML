@@ -45,8 +45,8 @@ class AutomatedML:
     """
     A class for automated machine learning, which optimizes hyperparameters and select best performing model(s).
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     y: pandas.DataFrame
         Target values of shape (n_samples, 1).
     X: pandas.DataFrame
@@ -117,6 +117,8 @@ class AutomatedML:
     ordinal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
         Ordinal columns contain ranked categories e.g. hours of the day
+    group_by_index_columns: list of string, optional, default=None)
+        Column names of multi-indexes for grouping of results
     fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
         The list of fractions of the data to use for fitting the models.
     random_state: int
@@ -179,6 +181,7 @@ class AutomatedML:
     boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], None] = None
     ordinal_columns: Union[List[str], None] = None
+    group_by_index_columns: None | List[str] = None
     fit_frac: List[float] = None
     random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
@@ -223,6 +226,10 @@ class AutomatedML:
             print("Warning: 'timeout_trial' is ineffective on Windows.")
         elif (os.name == 'nt'):
             self.timeout_trial = self._timeout_trial_default
+
+        if isinstance(self.group_by_index_columns, list):
+            non_group_msg = "Grouping columns must be included in index columns. Are you sure the columns are included in your multi-index dataframe?"
+            assert {*self.group_by_index_columns}.issubset(self.X.index.names), non_group_msg
 
 
     def create_dir(self):
@@ -557,10 +564,21 @@ class AutomatedML:
                     try:
                         # -- make fold prediction on original test fraction of training dataset
                         prediction = pipeline.predict(fold_X_test_frac)
+                        
+                        
+                        # -- average predictions and true values over 'safe'/'group' multi-index
+                        if isinstance(self.group_by_index_columns, list):
+                            fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).mean()
+                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).mean()
+                            pass
+                        
+                        else:
+                            fold_y_test_frac_eval = fold_y_test_frac
+                            prediction_eval = prediction
+                            pass
 
                         # -- assess prediction with chosen metric
-                        result_fold = self.metric_optimise(fold_y_test_frac, prediction)
-                        pass
+                        result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
 
                     except Exception as e:
                         print(e)
