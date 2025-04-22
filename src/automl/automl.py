@@ -223,6 +223,7 @@ class AutomatedML:
 
         self.create_dir()
         self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
+        self.save_train_test_data()
 
         if (self.timeout_trial is not None) & (os.name == 'nt'):
             print("Warning: 'timeout_trial' is ineffective on Windows.")
@@ -249,7 +250,7 @@ class AutomatedML:
         return self
 
 
-    def split_train_test(self, shuffle: bool = True, stratify: pd.DataFrame = None ):
+    def split_train_test(self, shuffle: bool = True, stratify: pd.DataFrame = None):
         """
         Split the data into training and test sets.
 
@@ -318,6 +319,21 @@ class AutomatedML:
         self.test_index = X_test.index.values
 
         return self
+    
+
+    def save_train_test_data(self):
+
+        # -- create storage folder
+        write_folder_input_data = self.write_folder + 'input_data/'
+        if not os.path.exists(write_folder_input_data):
+            os.makedirs(write_folder_input_data)
+        
+        self.X_train.to_parquet(write_folder_input_data + 'X_train.parquet')
+        self.X_test.to_parquet(write_folder_input_data + 'X_test.parquet')
+        self.y_train.to_parquet(write_folder_input_data + 'y_train.parquet')
+        self.y_test.to_parquet(write_folder_input_data + 'y_test.parquet')
+
+        return
 
 
     @FuncHelper.method_warning_catcher
@@ -416,7 +432,6 @@ class AutomatedML:
             instantiates PCA compression and the transformer for the dependent variables. Finally, the method tunes
             the estimator algorithm and creates the model.
             """
-
             
             def _objective(trial):
                 # -- Instantiate scaler for independents
