@@ -40,6 +40,7 @@ from .utils.grouped_train_test_splitter import groupwise_train_test_split
 # TODO boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
 # TODO several classification models accept class weights, implement class weight support
 
+NoneType = type(None)
 
 @dataclass
 class AutomatedML:
@@ -278,11 +279,11 @@ class AutomatedML:
 
         if type(self.nominal_columns) == type(self.ordinal_columns) == list:
             submitted_non_numeric = set(self.nominal_columns + self.ordinal_columns)
-        elif type(self.nominal_columns) == type(self.ordinal_columns) == type(None):
+        elif type(self.nominal_columns) == type(self.ordinal_columns) == NoneType:
             submitted_non_numeric = set([])
-        elif type(self.nominal_columns) == type(None):
+        elif type(self.nominal_columns) == NoneType:
             submitted_non_numeric = set(self.ordinal_columns)
-        elif type(self.ordinal_columns) == type(None):
+        elif type(self.ordinal_columns) == NoneType:
             submitted_non_numeric = set(self.nominal_columns)
 
         non_numeric_difference = list(set(non_numeric_column_names) ^ submitted_non_numeric)
@@ -582,13 +583,11 @@ class AutomatedML:
                         # -- make fold prediction on original test fraction of training dataset
                         prediction = pipeline.predict(fold_X_test_frac)
                         
-                        
                         # -- average predictions and true values over 'safe'/'group' multi-index
                         if isinstance(self.group_by_index_columns, list):
                             fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).mean()
                             prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).mean()
                             pass
-                        
                         else:
                             fold_y_test_frac_eval = fold_y_test_frac
                             prediction_eval = prediction
@@ -931,7 +930,7 @@ class AutomatedML:
         import shap
         
         # -- reload the final model if it exists
-        if type(self._model_final) is type(None):
+        if type(self._model_final) is NoneType:
             try:
                 self._model_final = joblib.load(f"{self.write_folder}stacked_model.joblib")
             except:
