@@ -28,6 +28,7 @@ from sklearn.model_selection import train_test_split
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
 from .utils.function_helper import FuncHelper
+from .utils.grouped_train_test_splitter import groupwise_train_test_split
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
@@ -39,14 +40,15 @@ from .utils.function_helper import FuncHelper
 # TODO boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
 # TODO several classification models accept class weights, implement class weight support
 
+NoneType = type(None)
 
 @dataclass
 class AutomatedML:
     """
     A class for automated machine learning, which optimizes hyperparameters and select best performing model(s).
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     y: pandas.DataFrame
         Target values of shape (n_samples, 1).
     X: pandas.DataFrame
@@ -117,6 +119,8 @@ class AutomatedML:
     ordinal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
         Ordinal columns contain ranked categories e.g. hours of the day
+    group_by_index_columns: list of string, optional, default=None)
+        Column names of multi-indexes for grouping of results
     fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
         The list of fractions of the data to use for fitting the models.
     random_state: int
@@ -179,6 +183,7 @@ class AutomatedML:
     boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], None] = None
     ordinal_columns: Union[List[str], None] = None
+    group_by_index_columns: None | List[str] = None
     fit_frac: List[float] = None
     random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
@@ -218,11 +223,16 @@ class AutomatedML:
 
         self.create_dir()
         self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
+        self.save_train_test_data()
 
         if (self.timeout_trial is not None) & (os.name == 'nt'):
             print("Warning: 'timeout_trial' is ineffective on Windows.")
         elif (os.name == 'nt'):
             self.timeout_trial = self._timeout_trial_default
+
+        if isinstance(self.group_by_index_columns, list):
+            non_group_msg = "Grouping columns must be included in index columns. Are you sure the columns are included in your multi-index dataframe?"
+            assert {*self.group_by_index_columns}.issubset(self.X.index.names), non_group_msg
 
 
     def create_dir(self):
@@ -240,7 +250,7 @@ class AutomatedML:
         return self
 
 
-    def split_train_test(self, shuffle: bool = True, stratify: pd.DataFrame = None ):
+    def split_train_test(self, shuffle: bool = True, stratify: pd.DataFrame = None):
         """
         Split the data into training and test sets.
 
@@ -270,11 +280,11 @@ class AutomatedML:
 
         if type(self.nominal_columns) == type(self.ordinal_columns) == list:
             submitted_non_numeric = set(self.nominal_columns + self.ordinal_columns)
-        elif type(self.nominal_columns) == type(self.ordinal_columns) == type(None):
+        elif type(self.nominal_columns) == type(self.ordinal_columns) == NoneType:
             submitted_non_numeric = set([])
-        elif type(self.nominal_columns) == type(None):
+        elif type(self.nominal_columns) == NoneType:
             submitted_non_numeric = set(self.ordinal_columns)
-        elif type(self.ordinal_columns) == type(None):
+        elif type(self.ordinal_columns) == NoneType:
             submitted_non_numeric = set(self.nominal_columns)
 
         non_numeric_difference = list(set(non_numeric_column_names) ^ submitted_non_numeric)
@@ -282,8 +292,24 @@ class AutomatedML:
             print(f"Possible ordinal or nominal columns not specified as either: {non_numeric_difference})")
 
         # -- split dataframes
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
-                                                                        random_state=self.random_state, shuffle=shuffle)
+        if isinstance(self.group_by_index_columns, List):
+            X_train, X_test, y_train, y_test = groupwise_train_test_split(
+                self.X, 
+                self.y,
+                group_names=self.group_by_index_columns,
+                test_size=self.test_frac,
+                random_state=self.random_state, 
+                shuffle=shuffle
+                )
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                self.X, 
+                self.y, 
+                test_size=self.test_frac,
+                random_state=self.random_state, 
+                shuffle=shuffle, 
+                stratify=stratify
+                )
 
         self.X_train = X_train
         self.X_test = X_test
@@ -293,6 +319,21 @@ class AutomatedML:
         self.test_index = X_test.index.values
 
         return self
+    
+
+    def save_train_test_data(self):
+
+        # -- create storage folder
+        write_folder_input_data = self.write_folder + 'input_data/'
+        if not os.path.exists(write_folder_input_data):
+            os.makedirs(write_folder_input_data)
+        
+        self.X_train.to_parquet(write_folder_input_data + 'X_train.parquet')
+        self.X_test.to_parquet(write_folder_input_data + 'X_test.parquet')
+        self.y_train.to_parquet(write_folder_input_data + 'y_train.parquet')
+        self.y_test.to_parquet(write_folder_input_data + 'y_test.parquet')
+
+        return
 
 
     @FuncHelper.method_warning_catcher
@@ -391,7 +432,6 @@ class AutomatedML:
             instantiates PCA compression and the transformer for the dependent variables. Finally, the method tunes
             the estimator algorithm and creates the model.
             """
-
             
             def _objective(trial):
                 # -- Instantiate scaler for independents
@@ -557,10 +597,19 @@ class AutomatedML:
                     try:
                         # -- make fold prediction on original test fraction of training dataset
                         prediction = pipeline.predict(fold_X_test_frac)
+                        
+                        # -- average predictions and true values over 'safe'/'group' multi-index
+                        if isinstance(self.group_by_index_columns, list):
+                            fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).mean()
+                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).mean()
+                            pass
+                        else:
+                            fold_y_test_frac_eval = fold_y_test_frac
+                            prediction_eval = prediction
+                            pass
 
                         # -- assess prediction with chosen metric
-                        result_fold = self.metric_optimise(fold_y_test_frac, prediction)
-                        pass
+                        result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
 
                     except Exception as e:
                         print(e)
@@ -896,7 +945,7 @@ class AutomatedML:
         import shap
         
         # -- reload the final model if it exists
-        if type(self._model_final) is type(None):
+        if type(self._model_final) is NoneType:
             try:
                 self._model_final = joblib.load(f"{self.write_folder}stacked_model.joblib")
             except:

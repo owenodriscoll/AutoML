@@ -10,7 +10,7 @@ class AutomatedRegression(AutomatedML):
     """
     Automated regression, child class of AutomatedML
     
-    Available regressors: 
+    Available regressors
     --------------------
     'dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars', 'adaboost', 
     'gradientboost', 'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet'

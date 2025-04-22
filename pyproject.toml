@@ -1,12 +1,12 @@
 [project]
 name = "py-automl-lib"
-version = "2.2.6"
+version = "2.2.7"
 authors = [
   { name="Owen O'D"},
 ]
 description = "Python package for automated hyperparameter-optimization of common machine-learning algorithms"
 readme = "README.md"
-requires-python = ">=3.11.0,<3.12.0"
+requires-python = ">=3.11.0,<3.13.0"
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "License :: OSI Approved :: MIT License",
@@ -24,6 +24,8 @@ dependencies = [
   "pandas",
   "SQLAlchemy",
   "timeout-decorator",
+  "fastparquet",
+  "pyarrow",
 ]
 
 [project.optional-dependencies]
