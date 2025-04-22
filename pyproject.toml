@@ -24,6 +24,8 @@ dependencies = [
   "pandas",
   "SQLAlchemy",
   "timeout-decorator",
+  "fastparquet",
+  "pyarrow",
 ]
 
 [project.optional-dependencies]
