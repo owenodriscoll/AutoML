@@ -28,6 +28,7 @@ from sklearn.model_selection import train_test_split
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
 from .utils.function_helper import FuncHelper
+from .utils.grouped_train_test_splitter import groupwise_train_test_split
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
@@ -289,8 +290,24 @@ class AutomatedML:
             print(f"Possible ordinal or nominal columns not specified as either: {non_numeric_difference})")
 
         # -- split dataframes
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=self.test_frac,
-                                                                        random_state=self.random_state, shuffle=shuffle)
+        if isinstance(self.group_by_index_columns, List):
+            X_train, X_test, y_train, y_test = groupwise_train_test_split(
+                self.X, 
+                self.y,
+                group_names=self.group_by_index_columns,
+                test_size=self.test_frac,
+                random_state=self.random_state, 
+                shuffle=shuffle
+                )
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                self.X, 
+                self.y, 
+                test_size=self.test_frac,
+                random_state=self.random_state, 
+                shuffle=shuffle, 
+                stratify=stratify
+                )
 
         self.X_train = X_train
         self.X_test = X_test
