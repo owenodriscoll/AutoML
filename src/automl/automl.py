@@ -121,6 +121,9 @@ class AutomatedML:
         Ordinal columns contain ranked categories e.g. hours of the day
     group_by_index_columns: list of string, optional, default=None)
         Column names of multi-indexes for grouping of results
+    agg_func: str, callable, optional (default='mean')
+        The aggregation function to use for grouping of results. If str, must be a valid pandas aggregation function.
+        If callable, must be a valid callable function that takes a pandas DataFrame and returns a pandas DataFrame.
     fit_frac: list of float, optional (default=[0.1, 0.2, 0.3, 0.4, 0.6, 1])
         The list of fractions of the data to use for fitting the models.
     random_state: int
@@ -184,6 +187,7 @@ class AutomatedML:
     nominal_columns: Union[List[str], None] = None
     ordinal_columns: Union[List[str], None] = None
     group_by_index_columns: None | List[str] = None
+    agg_func: Callable | str = 'mean'
     fit_frac: List[float] = None
     random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
@@ -600,8 +604,9 @@ class AutomatedML:
                         
                         # -- average predictions and true values over 'safe'/'group' multi-index
                         if isinstance(self.group_by_index_columns, list):
-                            fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).mean()
-                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).mean()
+                            
+                            fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).aggregate(self.agg_func)
+                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).aggregate(self.agg_func)
                             pass
                         else:
                             fold_y_test_frac_eval = fold_y_test_frac
