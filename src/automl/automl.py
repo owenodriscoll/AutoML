@@ -103,6 +103,9 @@ class AutomatedML:
     reload_trial_cap: bool, optional (default=False)
         Upper bound on number of trials if new trials are permitted on reloaded study. E.g. if n_trials = 50 and reloaded
         study already performed 40 trials, the new study will at most perform 10 additional trials
+    overwrite_stacked_model: bool, optional (default=False)
+        Whether to overwrite the final stacked model if one already exists. 
+        The stacked model can still be accessed under `self._model_final` after running `model_evaluate`
     models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
         The list of names of models to optimize, varies depending on whether objective is regression or classification.
         Check documentation of AutomatedML children classes for details
@@ -182,7 +185,7 @@ class AutomatedML:
     write_folder: str = os.getcwd() + '/AUTOML/'
     reload_study: bool = False
     reload_trial_cap: bool = False
-    overwrite: bool = False
+    overwrite_stacked_model: bool = False
     boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], None] = None
     ordinal_columns: Union[List[str], None] = None
@@ -850,16 +853,12 @@ class AutomatedML:
                 write_file_stacked_model = self.write_folder + "stacked_model.joblib"
 
                 if os.path.isfile(write_file_stacked_model):
-                    question = "Stacked model already exists in directory. Overwrite ? (y/n):"
-                    user_input = input(len(question) * '_' + '\n' + question + '\n' + len(question) * '_' + '\n')
 
-                    if user_input != 'n':
-                        response = "Stacked model overwritten"
+                    if self.overwrite_stacked_model:
+                        print("Stacked model overwritten (overwrite_stacked_model = True)", flush = True)
                         joblib.dump(self._model_final, write_file_stacked_model)
                     else:
-                        response = "Stacked model not saved"
-
-                    print(len(response) * '_' + '\n' + response + '\n' + len(response) * '_'  + '\n')
+                        print("Stacked model not saved (overwrite_stacked_model != True)", flush = True)
 
                 # -- if file doesn't exist, write it
                 if not os.path.isfile(write_file_stacked_model):
@@ -869,7 +868,6 @@ class AutomatedML:
                 self._model_final = estimator_temp[0][1]
                 FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
-                
 
             # -- create dictionary with elements per metric allowing per metric fold performance to be stored
             metric_performance_dict = dict(
