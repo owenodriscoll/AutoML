@@ -8,10 +8,11 @@ import joblib
 import pandas as pd
 import numpy as np
 import timeout_decorator
+import functools
 from dataclasses import dataclass
 from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
-from optuna.samplers import TPESampler
+from optuna.samplers import TPESampler, NSGAIISampler
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -41,6 +42,29 @@ from .utils.grouped_train_test_splitter import groupwise_train_test_split
 # TODO several classification models accept class weights, implement class weight support
 
 NoneType = type(None)
+
+# -- Picklable combined scorer class for multi-objective optimization
+class MultiObjectiveScorer:
+    """
+    A picklable scorer for multi-objective optimization.
+    Uses weighted combination of multiple metrics.
+    
+    Parameters
+    ----------
+    metrics : list of callables
+        List of metric functions
+    weights : list of float
+        List of weights for each metric
+    """
+    def __init__(self, metrics, weights):
+        self.metrics = metrics
+        self.weights = weights
+    
+    def __call__(self, y_true, y_pred):
+        """Calculate weighted combination of metrics."""
+        scores = [metric(y_true, y_pred) for metric in self.metrics]
+        weighted_score = sum(w * s for w, s in zip(self.weights, scores))
+        return weighted_score
 
 @dataclass
 class AutomatedML:
@@ -90,12 +114,16 @@ class AutomatedML:
         DEPRECIATED
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
-    metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
-        The metric to use for optimization of hyperparameters. 
+    metric_optimise: callable or list of callables, optional (default=median_absolute_error for regression, accuracy_score for classification)
+        The metric(s) to use for optimization of hyperparameters. If list, enables multi-objective optimization.
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
         The metrics to use for assessment of models.
-    optimisation_direction: str, optional (default='minimize')
-        The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
+    optimisation_direction: str or list of str, optional (default='maximize')
+        The direction(s) to optimize the hyperparameters, either 'minimize' or 'maximize'. 
+        If metric_optimise is a list, this must also be a list of same length.
+    metric_weights: list of float, optional (default=None)
+        Weights for each objective in multi-objective optimization. If None, equal weights are used.
+        Only used when metric_optimise is a list.
     write_folder: str, optional (default='/AUTOML/' in the current working directory)
         The folder where to write the results and models.
     reload_study: bool, optional (default=False)
@@ -179,9 +207,10 @@ class AutomatedML:
     spline_value: Union[int, float, dict, None] = None
     pca_value: Union[int, float, dict, None] = None
     fourrier_value: int = None
-    metric_optimise: Callable = None
+    metric_optimise: Union[Callable, List[Callable]] = None
     metric_assess: List[Callable] = None
-    optimisation_direction: str = 'maximize'
+    optimisation_direction: Union[str, List[str]] = 'maximize'
+    metric_weights: Union[List[float], None] = None
     write_folder: str = os.getcwd() + '/AUTOML/'
     reload_study: bool = False
     reload_trial_cap: bool = False
@@ -212,6 +241,7 @@ class AutomatedML:
     _stratify: pd.DataFrame = None
     _model_final = None
     _timeout_trial_default = 100
+    _is_multi_objective: bool = False
 
 
     # -- conditionally mutate __init__ and call initialization functions
@@ -220,13 +250,32 @@ class AutomatedML:
         self.cross_validation = self.cross_validation if 'split' in dir(self.cross_validation) else \
             KFold(n_splits=5, shuffle=True, random_state=self.random_state)
 
-        self.sampler = self.sampler if 'optuna.samplers' in type(self.sampler).__module__ else \
-            TPESampler(seed=self.random_state)
+        # -- use appropriate sampler for optimization type
+        if self.sampler is None or 'optuna.samplers' not in type(self.sampler).__module__:
+            # -- Use NSGAIISampler for multi-objective, TPESampler for single-objective
+            if self._is_multi_objective:
+                self.sampler = NSGAIISampler(seed=self.random_state)
+            else:
+                self.sampler = TPESampler(seed=self.random_state)
+        # -- Note: if sampler is already provided, use it as-is
 
         self.pruner = self.pruner if 'optuna.pruners' in type(self.pruner).__module__ else \
             optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
 
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if self.fit_frac is None else self.fit_frac
+
+        # -- detect and validate multi-objective setup
+        self._is_multi_objective = isinstance(self.metric_optimise, list) and len(self.metric_optimise) > 1
+        if self._is_multi_objective:
+            if not isinstance(self.optimisation_direction, list):
+                raise ValueError("optimisation_direction must be a list when metric_optimise is a list")
+            if len(self.optimisation_direction) != len(self.metric_optimise):
+                raise ValueError(f"optimisation_direction length ({len(self.optimisation_direction)}) must match metric_optimise length ({len(self.metric_optimise)})")
+            if self.metric_weights is None:
+                # -- use equal weights if not specified
+                self.metric_weights = [1.0 / len(self.metric_optimise)] * len(self.metric_optimise)
+            elif len(self.metric_weights) != len(self.metric_optimise):
+                raise ValueError(f"metric_weights length ({len(self.metric_weights)}) must match metric_optimise length ({len(self.metric_optimise)})")
 
         self.create_dir()
         self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
@@ -405,13 +454,24 @@ class AutomatedML:
                     study_sampler = self.sampler
                     create_engine(dir_study_db_url)
 
-                # -- create study or reload previous
-                study = optuna.create_study(study_name=f"{self._ml_objective}_{model_name}",
-                                            direction=self.optimisation_direction,
-                                            sampler=study_sampler,
-                                            pruner=self.pruner,
-                                            storage = dir_study_db_url,
-                                            load_if_exists = self.reload_study)
+                # -- create study or reload previous (handle both single and multi-objective)
+                if self._is_multi_objective:
+                    # -- Multi-objective: no pruner (not supported)
+                    study = optuna.create_study(
+                        study_name=f"{self._ml_objective}_{model_name}",
+                        directions=self.optimisation_direction,
+                        sampler=study_sampler,
+                        storage=dir_study_db_url,
+                        load_if_exists=self.reload_study)
+                else:
+                    # -- Single-objective: include pruner
+                    study = optuna.create_study(
+                        study_name=f"{self._ml_objective}_{model_name}",
+                        direction=self.optimisation_direction,
+                        sampler=study_sampler,
+                        pruner=self.pruner,
+                        storage=dir_study_db_url,
+                        load_if_exists=self.reload_study)
 
                 # -- prevent running more trials than cap
                 if (self.reload_study) & (self.reload_trial_cap):
@@ -616,29 +676,43 @@ class AutomatedML:
                             prediction_eval = prediction
                             pass
 
-                        # -- assess prediction with chosen metric
-                        result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
+                        # -- assess prediction with chosen metric(s)
+                        if self._is_multi_objective:
+                            result_fold = [metric(fold_y_test_frac_eval, prediction_eval) 
+                                         for metric in self.metric_optimise]
+                        else:
+                            result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
 
                     except Exception as e:
                         print(e)
-                        result_fold = np.nan
+                        if self._is_multi_objective:
+                            result_fold = [np.nan] * len(self.metric_optimise)
+                        else:
+                            result_fold = np.nan
                         pass
 
                     # -- store results to assess performance per fraction
                     result_folds.append(result_fold)
 
                 # -- Calculate mean and std results from all folds per fraction of data
-                result_folds_frac = np.mean(result_folds)
-                result_folds_std = np.std(result_folds)
+                if self._is_multi_objective:
+                    result_folds_frac = [np.mean([fold_result[i] for fold_result in result_folds]) 
+                                        for i in range(len(self.metric_optimise))]
+                    result_folds_std = [np.std([fold_result[i] for fold_result in result_folds]) 
+                                       for i in range(len(self.metric_optimise))]
+                else:
+                    result_folds_frac = np.mean(result_folds)
+                    result_folds_std = np.std(result_folds)
 
                 # -- Save results
                 result_folds_fracs.append(result_folds_frac)
                 result_folds_stds.append(result_folds_std)
                 
                 # -- only prune if not applied on fraction containing all datapoints
-                if partial_fit_frac < 1.0:
+                # -- NOTE: Pruning is not supported for multi-objective optimization in Optuna
+                if partial_fit_frac < 1.0 and not self._is_multi_objective:
 
-                    # -- Report results to decide whether to prune
+                    # -- Report results to decide whether to prune (single-objective only)
                     trial.report(result_folds_frac, idx_fraction)
 
                     # -- Prune the intermediate value if necessary.
@@ -689,14 +763,29 @@ class AutomatedML:
                 random.seed(random_state_model_selection)
 
             # -- reload relevant study. Sampler not reloaded here as no additional studies are performed
-            study = optuna.create_study(
-                study_name=f"{self._ml_objective}_{model_name}",
-                direction=self.optimisation_direction,
-                storage=f"sqlite:///{self.write_folder}{model_name}.db",
-                load_if_exists=True)
+            if self._is_multi_objective:
+                study = optuna.create_study(
+                    study_name=f"{self._ml_objective}_{model_name}",
+                    directions=self.optimisation_direction,
+                    storage=f"sqlite:///{self.write_folder}{model_name}.db",
+                    load_if_exists=True)
+            else:
+                study = optuna.create_study(
+                    study_name=f"{self._ml_objective}_{model_name}",
+                    direction=self.optimisation_direction,
+                    storage=f"sqlite:///{self.write_folder}{model_name}.db",
+                    load_if_exists=True)
 
             # -- select parameters corresponding to model
-            list_params = list(study.best_params)
+            # -- For multi-objective, get params from first Pareto trial; for single-objective, use best_params
+            if self._is_multi_objective:
+                # -- Use first trial from Pareto front
+                best_trial_params = study.best_trials[0].params if study.best_trials else {}
+                list_params = list(best_trial_params.keys())
+            else:
+                # -- Single-objective: use best_params
+                list_params = list(study.best_params) if study.best_params else []
+            
             list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
                                          'transformers', 'n_quantiles']
             list_params_model = set(list_params).difference(set(list_params_not_model))
@@ -705,50 +794,100 @@ class AutomatedML:
             df_trials = study.trials_dataframe()
 
             # -- remove trials returning NaN's or undesired_sign
-            if performance_sign_positive:
-                error_sign_condition = (df_trials.value >= 0)
-            else: 
-                error_sign_condition = (df_trials.value <= 0)
+            # -- For multi-objective, check all value columns; for single-objective, check the 'value' column
+            if self._is_multi_objective:
+                # -- Multi-objective: value columns are named value_0, value_1, etc.
+                value_columns = [col for col in df_trials.columns if col.startswith('value_')]
+                # -- Filter out trials with NaN in any objective
+                valid_trials_mask = df_trials[value_columns].notna().all(axis=1) & (df_trials['state'] == 'COMPLETE')
+                df_trials_non_pruned = df_trials[valid_trials_mask]
+            else:
+                # -- Single-objective: use the standard 'value' column
+                if performance_sign_positive:
+                    error_sign_condition = (df_trials.value >= 0)
+                else: 
+                    error_sign_condition = (df_trials.value <= 0)
 
-            df_trials_non_pruned = df_trials[
-                (df_trials.state == 'COMPLETE') & 
-                (np.isfinite(df_trials.value)) & 
-                (error_sign_condition) 
-                ]
+                df_trials_non_pruned = df_trials[
+                    (df_trials.state == 'COMPLETE') & 
+                    (np.isfinite(df_trials.value)) & 
+                    (error_sign_condition) 
+                    ]
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
-            if self.n_weak_models > len(df_trials_non_pruned) -1:
+            if len(df_trials_non_pruned) == 0:
+                print(f"Warning: No valid completed trials found for {model_name}. Skipping model.", flush=True)
+                continue
+            
+            if self.n_weak_models > len(df_trials_non_pruned) - 1:
 
                 message = ["Number of unique weak models less than requested number of weak models: " +
                            f"{len(df_trials_non_pruned) -1} < {self.n_weak_models} \n" +
                            "n_weak_models set to total number of weak models instead."]
                 print(message[0], flush=True)
 
-                n_weak_models = len(df_trials_non_pruned) -1
+                n_weak_models = len(df_trials_non_pruned) - 1
 
-            # -- select best
-            if self.optimisation_direction == 'maximize':
-                idx_best = df_trials_non_pruned.index[df_trials_non_pruned.value.argmax()]
-            elif self.optimisation_direction == 'minimize':
-                idx_best = df_trials_non_pruned.index[df_trials_non_pruned.value.argmin()]
+            # -- select best (handle both single and multi-objective)
+            if self._is_multi_objective:
+                # -- Use Pareto front for multi-objective optimization
+                if not study.best_trials:
+                    # -- Fallback if no Pareto front (shouldn't happen with valid trials)
+                    print(f"Warning: No Pareto front found for {model_name}. Using first completed trial.", flush=True)
+                    pareto_trials = [trial.number for trial in study.get_trials() if trial.state.name == 'COMPLETE'][:1]
+                else:
+                    pareto_trials = [trial.number for trial in study.best_trials]
+                
+                idx_best_set = pareto_trials[:min(len(pareto_trials), 1 + n_weak_models)]
+                
+                # -- if not enough Pareto trials, add additional trials
+                if len(idx_best_set) < 1 + n_weak_models:
+                    idx_remaining = [t for t in df_trials_non_pruned.number.values if t not in idx_best_set]
+                    additional_needed = min(1 + n_weak_models - len(idx_best_set), len(idx_remaining))
+                    if additional_needed > 0:
+                        idx_best_set = idx_best_set + random.sample(idx_remaining, additional_needed)
+                
+                idx_models = idx_best_set
+            else:
+                # -- Single objective: select best trial (use .number to get trial number, not index)
+                if self.optimisation_direction == 'maximize':
+                    idx_best = df_trials_non_pruned.number.iloc[df_trials_non_pruned.value.argmax()]
+                elif self.optimisation_direction == 'minimize':
+                    idx_best = df_trials_non_pruned.number.iloc[df_trials_non_pruned.value.argmin()]
 
-            # -- add additional models
-            idx_remaining = df_trials_non_pruned.number.values.tolist()
-            idx_remaining.remove(idx_best)
-            idx_models = [idx_best] + random.sample(idx_remaining, n_weak_models)
+                # -- add additional models (safely handle case where not enough trials available)
+                idx_remaining = df_trials_non_pruned.number.values.tolist()
+                idx_remaining.remove(idx_best)
+                n_weak_to_sample = min(n_weak_models, len(idx_remaining))
+                idx_models = [idx_best] + (random.sample(idx_remaining, n_weak_to_sample) if n_weak_to_sample > 0 else [])
+
+            # -- check if we have valid models to work with
+            if not idx_models:
+                print(f"Warning: No valid trials found for {model_name}. Skipping model.", flush=True)
+                continue
 
             # -- reset random state to pre-sampling state 
             if random_state_model_selection == None:
                 random.seed(self.random_state)
 
             # -- name best and weaker models
-            selected_models = [model_name+'_best']  + [model_name+'_'+str(i) for i in idx_models[1:]]
+            if self._is_multi_objective:
+                # -- For multi-objective, name models from Pareto front
+                selected_models = [model_name+'_pareto_'+str(i) for i in range(len(idx_models))]
+            else:
+                selected_models = [model_name+'_best']  + [model_name+'_'+str(i) for i in idx_models[1:]]
 
             # -- create estimator for best and additional weaker models
             for i, idx_model in enumerate(idx_models):
 
-                model_params = study.trials[idx_model].params
+                # -- safely access trial parameters (defensive check for trial existence)
+                try:
+                    model_params = study.trials[idx_model].params
+                except (IndexError, KeyError):
+                    print(f"Warning: Could not access trial {idx_model} for {model_name}. Skipping.", flush=True)
+                    continue
+                
                 parameter_dict = {k: model_params[k] for k in model_params.keys() & set(list_params_model)}
 
                 # -- select all the pipeline steps corresponding to input settings or best trial
@@ -822,10 +961,19 @@ class AutomatedML:
                 estimator_temp = self.estimators
 
                 # -- create a scorer compatible with Cross Validated Ridge
-                greater_is_better = self.optimisation_direction == 'maximize'
-                scoring = make_scorer(
-                    self.metric_optimise, 
-                    greater_is_better = greater_is_better
+                if self._is_multi_objective:
+                    # -- Use weighted combination of metrics for multi-objective
+                    combined_score_func = MultiObjectiveScorer(self.metric_optimise, self.metric_weights)
+                    
+                    # -- determine if overall combination should be maximized or minimized
+                    # -- use first objective's direction as overall direction
+                    greater_is_better = self.optimisation_direction[0] == 'maximize'
+                    scoring = make_scorer(combined_score_func, greater_is_better=greater_is_better)
+                else:
+                    greater_is_better = self.optimisation_direction == 'maximize'
+                    scoring = make_scorer(
+                        self.metric_optimise, 
+                        greater_is_better=greater_is_better
                     )
 
                 # -- fit stacked model while catching warnings
