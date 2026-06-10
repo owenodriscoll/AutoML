@@ -1,6 +1,6 @@
 [project]
 name = "py-automl-lib"
-version = "2.2.9"
+version = "2.2.10"
 authors = [
   { name="Owen O'D"},
 ]
