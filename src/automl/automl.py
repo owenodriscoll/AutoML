@@ -92,6 +92,7 @@ class AutomatedML:
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
         The metric to use for optimization of hyperparameters. 
+        NOTE this metric must be pickle-able (lambda functions are non-pickleable) 
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
         The metrics to use for assessment of models.
     optimisation_direction: str, optional (default='minimize')
