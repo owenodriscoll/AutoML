@@ -29,6 +29,7 @@ from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, Scaler
     TransformerChooser, CategoricalChooser#, FourrierExpansion
 from .utils.function_helper import FuncHelper
 from .utils.grouped_train_test_splitter import groupwise_train_test_split
+from .utils.misc import assert_not_lambda
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
@@ -217,6 +218,8 @@ class AutomatedML:
 
     # -- conditionally mutate __init__ and call initialization functions
     def __post_init__(self):
+        
+        assert_not_lambda(self.metric_optimise)
 
         self.cross_validation = self.cross_validation if 'split' in dir(self.cross_validation) else \
             KFold(n_splits=5, shuffle=True, random_state=self.random_state)

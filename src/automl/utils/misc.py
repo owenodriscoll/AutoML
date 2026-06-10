@@ -5,6 +5,15 @@ from matplotlib import pyplot as plt
 import pandas as pd 
 import numpy as np
 
+
+def assert_not_lambda(func):
+    assert callable(func), f"{func!r} is not callable"
+    assert func.__name__ != "<lambda>", (
+        f"Lambda functions are not allowed: {func!r}. "
+        "Use a named function defined with 'def'."
+    )
+
+
 def outlier_detector(df, column_key_start, column_key_end, pca_comp = 0.80, neighbours = 100, plot_PCA = False):
     """
     Function using SKlearn's 'LocalOutlierFactor' to detec outliers within a specififed range of the input df's columns
