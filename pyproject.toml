@@ -21,7 +21,8 @@ dependencies = [
   "optuna",
   "scikit-learn",
   "numpy",
-  "pandas",
+  # this pandas version is needed to prevent errors in grouping by index
+  "pandas>=3.0.0",
   "SQLAlchemy",
   "timeout-decorator",
   "fastparquet",
