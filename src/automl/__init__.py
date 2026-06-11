@@ -1,2 +1,3 @@
 from .auto_classification import AutomatedClassification
 from .auto_regression import AutomatedRegression
+from .utils.watermark import watermark_from_pyproject

@@ -27,6 +27,9 @@ dependencies = [
   "timeout-decorator",
   "fastparquet",
   "pyarrow",
+  # these are needed for watermarking package versions
+  "tomli",
+  "watermark",
 ]
 
 [project.optional-dependencies]
