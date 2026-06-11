@@ -856,8 +856,10 @@ class AutomatedML:
                 # -- store stacked model, if file already exists, confirm overwrite
                 write_file_stacked_model = self.write_folder + "stacked_model.joblib"
 
-                if os.path.isfile(write_file_stacked_model):
+                # -- removing custom scorer before pickling to prevent pickling errors on metric_optimise
+                self._model_final.final_estimator.scoring = None
 
+                if os.path.isfile(write_file_stacked_model):
                     if self.overwrite_stacked_model:
                         print("Stacked model overwritten (overwrite_stacked_model = True)", flush = True)
                         joblib.dump(self._model_final, write_file_stacked_model)
