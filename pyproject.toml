@@ -21,15 +21,21 @@ dependencies = [
   "optuna",
   "scikit-learn",
   "numpy",
+  
   # this pandas version is needed to prevent errors in grouping by index
   "pandas>=3.0.0",
   "SQLAlchemy",
   "timeout-decorator",
   "fastparquet",
   "pyarrow",
+
   # these are needed for watermarking package versions
   "tomli",
   "watermark",
+
+  # for pickling custom scorers
+  "cloudpickle",
+
 ]
 
 [project.optional-dependencies]

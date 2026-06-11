@@ -4,9 +4,9 @@ import sys
 import pickle
 import random
 import optuna
-import joblib
-import pandas as pd
+import cloudpickle
 import numpy as np
+import pandas as pd
 import timeout_decorator
 from dataclasses import dataclass
 from typing import Callable, Union, List, Dict, Any
@@ -368,7 +368,7 @@ class AutomatedML:
             and `self.pruner` attributes respectively. 
             
             The method uses the `_create_objective` function to create the objective function that is optimized by Optuna.
-            The final study iteration is saved using joblib.
+            The final study iteration is saved using cloudpickle.
             """
 
             # -- if catboost is loaded prepare special catch for common catboost errors
@@ -854,21 +854,20 @@ class AutomatedML:
                 self.y_pred = self._model_final.predict(self.X_test)
 
                 # -- store stacked model, if file already exists, confirm overwrite
-                write_file_stacked_model = self.write_folder + "stacked_model.joblib"
-
-                # -- removing custom scorer before pickling to prevent pickling errors on metric_optimise
-                self._model_final.final_estimator.scoring = None
+                write_file_stacked_model = self.write_folder + "stacked_model.cloudpickle"
 
                 if os.path.isfile(write_file_stacked_model):
                     if self.overwrite_stacked_model:
                         print("Stacked model overwritten (overwrite_stacked_model = True)", flush = True)
-                        joblib.dump(self._model_final, write_file_stacked_model)
+                        with open(write_file_stacked_model, 'wb') as f:
+                            cloudpickle.dump(self._model_final, f)
                     else:
                         print("Stacked model not saved (overwrite_stacked_model != True)", flush = True)
 
                 # -- if file doesn't exist, write it
                 if not os.path.isfile(write_file_stacked_model):
-                    joblib.dump(self._model_final, write_file_stacked_model)
+                    with open(write_file_stacked_model, 'wb') as f:
+                        cloudpickle.dump(self._model_final, f)
 
             else:
                 self._model_final = estimator_temp[0][1]
@@ -956,7 +955,7 @@ class AutomatedML:
         # -- reload the final model if it exists
         if type(self._model_final) is NoneType:
             try:
-                self._model_final = joblib.load(f"{self.write_folder}stacked_model.joblib")
+                self._model_final = cloudpickle.load(f"{self.write_folder}stacked_model.cloudpickle")
             except:
                 raise Exception(f"No trained model available in write_folder: {self.write_folder}")
 
