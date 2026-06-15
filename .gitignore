@@ -6,3 +6,4 @@ catboost_info/
 dist/*
 dist_old/*
 *.egg-info
+build/*

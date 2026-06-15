@@ -4,6 +4,7 @@ import sys
 import pickle
 import random
 import optuna
+import warnings
 import cloudpickle
 import numpy as np
 import pandas as pd
@@ -13,9 +14,6 @@ from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-
 from sklearn.model_selection import KFold
 from sklearn.metrics import make_scorer
 from sklearn.compose import TransformedTargetRegressor
@@ -24,7 +22,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
 from sklearn.linear_model import RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
+from sklearn.multioutput import MultiOutputRegressor
 
+from .multi_output import MultiOutputStackingRegressor
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
 from .utils.function_helper import FuncHelper
@@ -35,13 +35,21 @@ from .utils.misc import assert_not_lambda
 # FIXME add encoding for clustering of feature importance 
 # FIXME make timeout_trial compatible with catboost
 
+# TODO Validate models for multi-output compatibility
+# TODO Separate transformers per target?
 # TODO try polynomial features with interactions_only = True, include_bias = False
 # TODO add option to overwrite study instead of only coninuing previous available studies
 # TODO add time constraint to reloading
 # TODO boosted regression design trees using fixed loss function, e.g. RMSE, set loss function to training metric
 # TODO several classification models accept class weights, implement class weight support
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 NoneType = type(None)
+
+models_with_early_stopping = ['xgboost', 'catboost', 'lightgbm']
+models_without_native_multioutput = ['bayesianridge', 'xgboost', 'catboost', 'lightgbm']
+
 
 @dataclass
 class AutomatedML:
@@ -51,7 +59,8 @@ class AutomatedML:
     Parameters
     ----------
     y: pandas.DataFrame
-        Target values of shape (n_samples, 1).
+        Target values of shape (n_samples, 1) for single-output or (n_samples, n_targets) for multi-output.
+        Multi-output mode is automatically enabled when y has 2+ columns.
     X: pandas.DataFrame
         Features of shape (n_samples, n_features).
     test_frac: float, optional (default=0.2)
@@ -92,10 +101,12 @@ class AutomatedML:
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
     metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
-        The metric to use for optimization of hyperparameters. 
-        NOTE this metric must be pickle-able (lambda functions are non-pickleable) 
+        The metric to use for optimization of hyperparameters. For multi-output, this metric should handle 
+        (y_true, y_pred) where both are DataFrames/arrays with shape (n_samples, n_targets). The metric should 
+        return a single scalar combining all targets (e.g., RMSE of ratios, weighted MSE, etc.).
+        NOTE this metric must be pickle-able (lambda functions are non-pickleable)
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
-        The metrics to use for assessment of models.
+        The metrics to use for assessment of models. For multi-output, these should handle multi-output predictions.
     optimisation_direction: str, optional (default='minimize')
         The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
     write_folder: str, optional (default='/AUTOML/' in the current working directory)
@@ -118,6 +129,7 @@ class AutomatedML:
         Lower values may be faster but yield less complex (and therefore perhaps worse) tuned models. 
         Higher values generally results in longer optimization time per model but more models pruned. 
         Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost.
+        For multi-output, early stopping uses the combined metric_optimise loss.
     nominal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
         Nominal columns contain unranked categories e.g. classes of weather type
@@ -125,7 +137,8 @@ class AutomatedML:
         Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
         Ordinal columns contain ranked categories e.g. hours of the day
     group_by_index_columns: list of string, optional, default=None)
-        Column names of multi-indexes for grouping of results
+        Column names of multi-indexes for grouping of results. For multi-output, grouping is applied
+        on the combined metric_optimise loss.
     agg_func: str, callable, optional (default='mean')
         The aggregation function to use for grouping of results. If str, must be a valid pandas aggregation function.
         If callable, must be a valid callable function that takes a pandas DataFrame and returns a pandas DataFrame.
@@ -145,20 +158,31 @@ class AutomatedML:
         nested functions and follows a pipeline for training and evaluating a regressor. The method starts by
         preparing the study for hyperparameter optimization and loops through each regressor in the list
         "regressors_2_optimise", optimizes its hyperparameters, and saves the final study iteration as a pickle file.
+        Supports both single-output and multi-output regression.
 
     model_select_best:
         This method is used to create estimator pipelines for all the regressors specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
+        Supports both single-output and multi-output regression.
 
     model_evaluate:
         Evaluates performance of selected models. I first trains the models on the training dataset and
-        then stacks the models and assesses performance on test fraction of dataset. 
+        then stacks the models and assesses performance on test fraction of dataset.
+        Supports both single-output and multi-output regression.
         
     model_feature_importance:
         Explains feature importance of stacked model using SHAP.  
 
     apply:
         applies in correct order 'model_hyperoptimize', 'model_select_best' and 'model_evaluate' methods.
+
+    Notes
+    -----
+    Multi-output mode is automatically enabled when y has 2 or more columns. In multi-output mode:
+    - Each model predicts all targets simultaneously (not separate models per target)
+    - The metric_optimise function should return a single scalar that combines losses across all targets
+    - Grouping (if specified) is applied on the combined metric_optimise loss
+    - The final stacked model also predicts all targets simultaneously
 
     Returns
     -------
@@ -210,6 +234,7 @@ class AutomatedML:
     _models_optimize: List[Callable] = None
     _models_assess: List[Callable] = None
     _ml_objective: str = None
+    _is_multioutput: bool = False
     _shuffle: bool = True
     _stratify: pd.DataFrame = None
     _model_final = None
@@ -235,6 +260,9 @@ class AutomatedML:
         self.create_dir()
         self.split_train_test(shuffle=self._shuffle, stratify=self._stratify)
         self.save_train_test_data()
+
+        # -- Detect multi-output mode
+        self._is_multioutput = self.y.shape[1] > 1
 
         if (self.timeout_trial is not None) & (os.name == 'nt'):
             print("Warning: 'timeout_trial' is ineffective on Windows.")
@@ -477,25 +505,32 @@ class AutomatedML:
                 model_with_parameters = model().set_params(**param)
 
                 # -- add early stopping for models that support it
-                early_stopping_models = model_name in ['xgboost', 'catboost', 'lightgbm']
+                early_stopping_models = model_name in models_with_early_stopping
+                needs_multi_outpu_wrapper = model_name in models_without_native_multioutput
+
                 valid_early_stop_input = (isinstance(self.boosted_early_stopping_rounds, int)) & (self.boosted_early_stopping_rounds != 0)
                 self._early_stopping_permitted = early_stopping_models & valid_early_stop_input
 
                 if self._early_stopping_permitted:
                     model_with_parameters=model_with_parameters.set_params(early_stopping_rounds=self.boosted_early_stopping_rounds)
 
+                if self._ml_objective == 'regression' and self._is_multioutput and needs_multi_outpu_wrapper:
+                    model_with_parameters = MultiOutputRegressor(model_with_parameters)
+
                 # -- ordinal and nominal encoding
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
 
-                # -- allow for transformed regressor
+                # -- allow for transformed regressor (single-output only)
+                # if self._ml_objective == 'regression' and not self._is_multioutput:
                 if self._ml_objective == 'regression':
-                    # -- Instantiate transformer for dependents
+                    # -- Instantiate transformer for dependents (single output)
                     transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
 
                     model_final = TransformedTargetRegressor(
                         regressor=model_with_parameters,
                         transformer=transformer
                     )
+
                 elif self._ml_objective == 'classification':
                     model_final = model_with_parameters
 
@@ -612,15 +647,15 @@ class AutomatedML:
                         # -- average predictions and true values over 'safe'/'group' multi-index
                         if isinstance(self.group_by_index_columns, list):
                             
-                            fold_y_test_frac_eval = fold_y_test_frac.groupby(self.group_by_index_columns).aggregate(self.agg_func)
-                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(self.group_by_index_columns).aggregate(self.agg_func)
+                            fold_y_test_frac_eval = fold_y_test_frac.groupby(level=self.group_by_index_columns).aggregate(self.agg_func)
+                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(level=self.group_by_index_columns).aggregate(self.agg_func)
                             pass
                         else:
                             fold_y_test_frac_eval = fold_y_test_frac
                             prediction_eval = prediction
                             pass
 
-                        # -- assess prediction with chosen metric
+                        # -- assess prediction with chosen metric (handles both single and multi-output)
                         result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
 
                     except Exception as e:
@@ -699,12 +734,6 @@ class AutomatedML:
                 storage=f"sqlite:///{self.write_folder}{model_name}.db",
                 load_if_exists=True)
 
-            # -- select parameters corresponding to model
-            list_params = list(study.best_params)
-            list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
-                                         'transformers', 'n_quantiles']
-            list_params_model = set(list_params).difference(set(list_params_not_model))
-
             # -- select all trials associated with model
             df_trials = study.trials_dataframe()
 
@@ -714,11 +743,26 @@ class AutomatedML:
             else: 
                 error_sign_condition = (df_trials.value <= 0)
 
-            df_trials_non_pruned = df_trials[
-                (df_trials.state == 'COMPLETE') & 
+            df_trials_complete = df_trials[df_trials.state == 'COMPLETE']
+            if df_trials_complete.empty:
+                print(f"No completed trials for {model_name} — skipping.", flush=True)
+                continue
+
+            df_trials_non_pruned = df_trials_complete[
                 (np.isfinite(df_trials.value)) & 
                 (error_sign_condition) 
                 ]
+            
+            if df_trials_non_pruned.empty:
+                print(f"No completed trials for {model_name} — skipping.", flush=True)
+                continue
+            
+            # -- select parameters corresponding to model
+            list_params = list(study.best_params)
+            list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
+                                         'transformers', 'n_quantiles']
+            list_params_model = set(list_params).difference(set(list_params_not_model))
+
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
@@ -764,14 +808,20 @@ class AutomatedML:
 
                 model_with_parameters = self._models_assess[model_name][0](**parameter_dict)
 
-                # -- Create transformed regressor
+                # -- Create transformed regressor (single-output only)
                 if self._ml_objective == 'regression':
+
+                    needs_multi_outpu_wrapper = model_name in models_without_native_multioutput
+                    if needs_multi_outpu_wrapper and self._is_multioutput:
+                        model_with_parameters = MultiOutputRegressor(model_with_parameters)
+                    
                     transformer = TransformerChooser(model_params.get('n_quantiles'), self.random_state).fit()
 
                     model_final = TransformedTargetRegressor(
-                        regressor=model_with_parameters,
-                        transformer=transformer
+                        regressor = model_with_parameters,
+                        transformer = transformer
                     )
+
                 # -- ... or normal classification model
                 elif self._ml_objective == 'classification':
                     model_final = model_with_parameters
@@ -834,24 +884,31 @@ class AutomatedML:
 
                 # -- fit stacked model while catching warnings
                 if self._ml_objective == 'regression':
-                    self._model_final = StackingRegressor(
-                        estimators=estimator_temp,
-                        final_estimator=RidgeCV(scoring=scoring),
-                        cv=self.cross_validation
-                        )
+                    _model_stacking = StackingRegressor
+                    final_estimator = RidgeCV(scoring=scoring)
+
+                    if self._is_multioutput:
+                        _model_stacking = MultiOutputStackingRegressor
 
                 elif self._ml_objective == 'classification':
-                    self._model_final = StackingClassifier(
-                        estimators=estimator_temp,
-                        final_estimator=RidgeClassifierCV(scoring=scoring),
-                        cv=self.cross_validation
-                        )
+                    _model_stacking = StackingClassifier
+                    final_estimator=RidgeClassifierCV(scoring=scoring)
+
+                self._model_final = _model_stacking(
+                    estimators=estimator_temp,
+                    final_estimator=final_estimator,
+                    cv=self.cross_validation
+                    )
 
                 FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
 
                 # -- predict on the whole testing dataset
                 self.y_pred = self._model_final.predict(self.X_test)
+                
+                # -- Handle multi-output: ensure predictions are in DataFrame format for consistency
+                if self._is_multioutput and isinstance(self.y_pred, np.ndarray):
+                    self.y_pred = pd.DataFrame(self.y_pred, columns=self.y_test.columns, index=self.X_test.index)
 
                 # -- store stacked model, if file already exists, confirm overwrite
                 write_file_stacked_model = self.write_folder + "stacked_model.cloudpickle"
@@ -885,6 +942,10 @@ class AutomatedML:
 
                 # -- Predict on the TEST data fold
                 prediction = self._model_final.predict(self.X_test.iloc[fold_test, :])
+
+                # -- Handle multi-output: ensure prediction is DataFrame for consistency
+                if self._is_multioutput and isinstance(prediction, np.ndarray):
+                    prediction = pd.DataFrame(prediction, columns=self.y_test.columns, index=self.X_test.iloc[fold_test].index)
 
                 # -- Assess prediction per metric and store per-fold performance in dictionary
                 [metric_performance_dict[key][1].append(
@@ -921,7 +982,7 @@ class AutomatedML:
             return
 
     
-    def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True):
+    def model_feature_importance(self, n_train_points = 200, n_test_points = 200, cluster = True, kwargs_shap_plot = {}) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         NOTE DOES NOT WORK WITH NON-NUMERIC DATA \n
         NOTE requires installation of the shap package \n
@@ -955,7 +1016,10 @@ class AutomatedML:
         # -- reload the final model if it exists
         if type(self._model_final) is NoneType:
             try:
-                self._model_final = cloudpickle.load(f"{self.write_folder}stacked_model.cloudpickle")
+                model_path = f"{self.write_folder}stacked_model.cloudpickle"
+                with open(model_path, 'rb') as f:
+                    self._model_final = cloudpickle.load(f)
+                
             except:
                 raise Exception(f"No trained model available in write_folder: {self.write_folder}")
 
@@ -982,13 +1046,30 @@ class AutomatedML:
         shap_values = FuncHelper.function_warning_catcher(ex.shap_values, [data],
                                                           self.warning_verbosity)
 
-        # -- create summary plot
-        shap.summary_plot(shap_values, features = data, feature_names = feature_names)
-        
-        # 
-        # most_important_feature = feature_names[np.argmax(shap_values.var(axis = 1))]
-        # shap.dependence_plot(most_important_feature, shap_values, features = data, feature_names = feature_names)
+        # -- single-output: shap_values is (n, p); multi-output: list of (n, p)
+        if self._is_multioutput:
+            target_names = list(self.y_test.columns)
 
-        return pd.DataFrame(data = shap_values, columns = feature_names), data
-        
+            result = {}
+            for i, target_name in enumerate(target_names):
+                sv_i = shap_values[:, :, i] # -- this select per target if multiple targets are present
+                shap.plots.violin(
+                    sv_i, 
+                    features=data, 
+                    feature_names=feature_names, 
+                    title=target_name,
+                    **kwargs_shap_plot
+                    )
+                result[target_name] = pd.DataFrame(sv_i, columns=feature_names)
 
+            return result, data
+
+        else:
+            shap.summary_plot(
+                shap_values, 
+                features=data, 
+                feature_names=feature_names,
+                title=target_name,
+                **kwargs_shap_plot
+                )
+            return pd.DataFrame(shap_values, columns=feature_names), data
