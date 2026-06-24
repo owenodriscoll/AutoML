@@ -694,7 +694,7 @@ class AutomatedML:
 
             return 
 
-    def model_select_best(self, random_state_model_selection: int | None = None, performance_sign_positive: bool = True) -> AutomatedML:
+    def model_select_best(self, random_state_model_selection: int | None = None) -> AutomatedML:
         """
         This method is used to create estimator pipelines for all the models specified in models_to_assess
         attribute and store them in the estimators attribute of the class instance.
@@ -709,9 +709,7 @@ class AutomatedML:
         ----------
         random_state_model_selection: int, None
             integer used to set the random state for random weak model selection
-        performance_sign_positive: bool, True
-            boolean used to indicate whether performance values should be positive or negative only 
-
+            
         Returns
         -------
         class instance.
@@ -738,20 +736,12 @@ class AutomatedML:
             df_trials = study.trials_dataframe()
 
             # -- remove trials returning NaN's or undesired_sign
-            if performance_sign_positive:
-                error_sign_condition = (df_trials.value >= 0)
-            else: 
-                error_sign_condition = (df_trials.value <= 0)
-
             df_trials_complete = df_trials[df_trials.state == 'COMPLETE']
             if df_trials_complete.empty:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
                 continue
 
-            df_trials_non_pruned = df_trials_complete[
-                (np.isfinite(df_trials.value)) & 
-                (error_sign_condition) 
-                ]
+            df_trials_non_pruned = df_trials_complete[np.isfinite(df_trials.value)]
             
             if df_trials_non_pruned.empty:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
