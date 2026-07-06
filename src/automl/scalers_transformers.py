@@ -101,8 +101,9 @@ class ScalerChooser:
 
 
 class TransformerChooser:
-    def __init__(self, n_quantiles: int = None, trial=None, random_state: int = 42):
+    def __init__(self, n_quantiles: int = None, output_distribution: str = 'uniform', trial=None, random_state: int = 42):
         self.n_quantiles = n_quantiles
+        self.output_distribution = output_distribution
         self.trial = trial
         self.random_state = random_state
         self.func = QuantileTransformer
@@ -112,11 +113,13 @@ class TransformerChooser:
         transform_type = self.trial.suggest_categorical("transformers", [None, 'quantile_trans'])
         if not transform_type == None:
             self.n_quantiles = self.trial.suggest_int('n_quantiles', 100, 4000, step=100)
+            self.output_distribution = self.trial.suggest_categorical('output_distribution', ['uniform', 'normal'])
         return self
 
     @decorator_report("n_quantiles")
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func().set_params, {'n_quantiles': self.n_quantiles,
+                                                                                 'output_distribution': self.output_distribution,
                                                                                  'random_state': self.random_state})
         return self.func_fitted
 
