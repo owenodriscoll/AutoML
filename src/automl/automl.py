@@ -1066,7 +1066,6 @@ class AutomatedML:
                 shap_values, 
                 features=data, 
                 feature_names=feature_names,
-                title=target_name,
                 **kwargs_shap_plot
                 )
             return pd.DataFrame(shap_values, columns=feature_names), data
