@@ -23,13 +23,18 @@ from typing import Union
 from .utils.function_helper import FuncHelper
 
 
-def decorator_report(variable, to_return_self: bool = False):
+def decorator_report(variables, to_return_self: bool = False):
+    if isinstance(variables, str):
+        variables = [variables]
+
     def wrap_function(f):
         def wrap_arguments(args):
-            if isinstance(getattr(args, variable), type(None)):
+            missing = any(
+                isinstance(getattr(args, var, None), type(None)) for var in variables
+            )
+            if missing:
                 return args if to_return_self else None
-            else:
-                return f(args)
+            return f(args)
 
         return wrap_arguments
 
@@ -101,7 +106,7 @@ class ScalerChooser:
 
 
 class TransformerChooser:
-    def __init__(self, n_quantiles: int = None, output_distribution: str = 'uniform', trial=None, random_state: int = 42):
+    def __init__(self, n_quantiles: int = None, output_distribution: str = None, trial=None, random_state: int = 42):
         self.n_quantiles = n_quantiles
         self.output_distribution = output_distribution
         self.trial = trial
@@ -110,13 +115,18 @@ class TransformerChooser:
         self.func_fitted = None
 
     def suggest_trial(self):
-        transform_type = self.trial.suggest_categorical("transformers", [None, 'quantile_trans'])
-        if not transform_type == None:
-            self.n_quantiles = self.trial.suggest_int('n_quantiles', 100, 4000, step=100)
-            self.output_distribution = self.trial.suggest_categorical('output_distribution', ['uniform', 'normal'])
+        if (self.n_quantiles is None) & (self.output_distribution is None):
+            transform_type = self.trial.suggest_categorical("transformers", [None, 'quantile_trans'])
+            if (not transform_type is None):
+                self.n_quantiles = self.trial.suggest_int('n_quantiles', 100, 4000, step=100)
+                self.output_distribution = self.trial.suggest_categorical('output_distribution', ['uniform', 'normal'])
+        else: 
+            self.n_quantiles = self.trial.suggest_int('n_quantiles', self.n_quantiles, self.n_quantiles, step=100)
+            self.output_distribution = self.trial.suggest_categorical('output_distribution', [self.output_distribution])
+
         return self
 
-    @decorator_report("n_quantiles")
+    @decorator_report(["n_quantiles", "output_distribution"])
     def fit(self):
         self.func_fitted = FuncHelper.run_with_argument(self.func().set_params, {'n_quantiles': self.n_quantiles,
                                                                                  'output_distribution': self.output_distribution,
