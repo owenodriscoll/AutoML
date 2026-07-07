@@ -150,6 +150,9 @@ class AutomatedML:
         The warning verbosity to use, default is 'ignore'.
     show_progress_bar: bool
         Whether to show individual trial results or a progress bar. Defaults to False
+    transformer_kwargs: dict, optional (default=None)
+        The keyword arguments to pass to the transformer, e.g. {'n_quantiles': 400, 'output_distribution': 'normal'}
+        If None, this parameters is optimized in the trials
 
     Methods
     -------
@@ -221,6 +224,7 @@ class AutomatedML:
     random_state: Union[int, None] = 42
     warning_verbosity: str = 'ignore'
     show_progress_bar: bool = False
+    transformer_kwargs: Dict[str, Any] = None
     X_train: pd.DataFrame = None
     X_test: pd.DataFrame = None
     y_train: pd.DataFrame = None
@@ -272,6 +276,9 @@ class AutomatedML:
         if isinstance(self.group_by_index_columns, list):
             non_group_msg = "Grouping columns must be included in index columns. Are you sure the columns are included in your multi-index dataframe?"
             assert {*self.group_by_index_columns}.issubset(self.X.index.names), non_group_msg
+
+        if self.transformer_kwargs is None:
+            self.transformer_kwargs = {}
 
 
     def create_dir(self):
@@ -524,7 +531,7 @@ class AutomatedML:
                 # if self._ml_objective == 'regression' and not self._is_multioutput:
                 if self._ml_objective == 'regression':
                     # -- Instantiate transformer for dependents (single output)
-                    transformer = TransformerChooser(random_state=self.random_state, trial=trial).suggest_and_fit()
+                    transformer = TransformerChooser(random_state=self.random_state, trial=trial, **self.transformer_kwargs).suggest_and_fit()
 
                     model_final = TransformedTargetRegressor(
                         regressor=model_with_parameters,
@@ -750,7 +757,7 @@ class AutomatedML:
             # -- select parameters corresponding to model
             list_params = list(study.best_params)
             list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
-                                         'transformers', 'n_quantiles']
+                                         'transformers', 'n_quantiles', 'output_distribution']
             list_params_model = set(list_params).difference(set(list_params_not_model))
 
 
@@ -805,7 +812,7 @@ class AutomatedML:
                     if needs_multi_outpu_wrapper and self._is_multioutput:
                         model_with_parameters = MultiOutputRegressor(model_with_parameters)
                     
-                    transformer = TransformerChooser(model_params.get('n_quantiles'), self.random_state).fit()
+                    transformer = TransformerChooser(model_params.get('n_quantiles'), model_params.get('output_distribution'), self.random_state).fit()
 
                     model_final = TransformedTargetRegressor(
                         regressor = model_with_parameters,
