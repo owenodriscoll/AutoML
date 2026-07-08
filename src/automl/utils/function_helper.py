@@ -1,4 +1,4 @@
-import warnings, sys, os
+import functools, warnings, sys, os
 
 
 class FuncHelper:
@@ -29,36 +29,43 @@ class FuncHelper:
         # if errors occur in function
         try:
             out = FuncHelper.run_with_argument(f, args)
-        except:
+        except Exception as e:
             warnings.simplefilter('default', UserWarning)
             sys.stdout = old_stdout
-            raise Exception("Error in function warning catcher")
+            # raise Exception("Error in function warning catcher")
+            raise RuntimeError("Error in function warning catcher") from e
 
         warnings.simplefilter(old_warning_verbosity, UserWarning)
         sys.stdout = old_stdout
 
         return out
-    
+
     @staticmethod
-    def method_warning_catcher(f):
-        def wrap_arguments(args):
-            warnings.simplefilter(args.warning_verbosity, UserWarning)
-            old_stdout = sys.stdout
-            if args.warning_verbosity == 'ignore':
-                sys.stdout = open(os.devnull, "w")
-            else:
-                sys.stdout = old_stdout
+    def method_warning_catcher(warning_verbosity=None):
+        def decorator(f):
 
-            # -- add in try loop such that warnings are reset to original even
-            # if errors occur in function
-            try:
-                f(args)
-            except:
-                warnings.simplefilter('default', UserWarning)
-                sys.stdout = old_stdout
-                raise Exception("Error in method warning catcher")
+            @functools.wraps(f)
+            def wrapper(self, *args, **kwargs):
 
-            warnings.simplefilter('default', UserWarning)
-            sys.stdout = old_stdout
+                verbosity = (
+                    warning_verbosity
+                    if warning_verbosity is not None
+                    else self.warning_verbosity
+                )
 
-        return wrap_arguments
+                with warnings.catch_warnings():
+                    warnings.simplefilter(verbosity, UserWarning)
+                    try:
+                        return f(self, *args, **kwargs)
+
+                    except Exception as e:
+                        warnings.warn(
+                            str(e),
+                            UserWarning,
+                            stacklevel=2
+                        )
+                        return None
+
+            return wrapper
+
+        return decorator

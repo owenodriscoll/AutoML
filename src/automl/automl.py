@@ -381,8 +381,7 @@ class AutomatedML:
 
         return
 
-
-    @FuncHelper.method_warning_catcher
+    @FuncHelper.method_warning_catcher()
     def model_hyperoptimise(self) -> AutomatedML:
         """
         Performs hyperparameter optimization on the models specified in `self.models_to_optimize` using Optuna.
@@ -666,7 +665,6 @@ class AutomatedML:
                         result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
 
                     except Exception as e:
-                        print(e)
                         result_fold = np.nan
                         pass
 
