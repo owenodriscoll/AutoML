@@ -152,7 +152,7 @@ class AutomatedML:
         Whether to show individual trial results or a progress bar. Defaults to False
     transformer_kwargs: dict, optional (default=None)
         The keyword arguments to pass to the transformer, e.g. {'n_quantiles': 400, 'output_distribution': 'normal'}
-        If None, this parameters is optimized in the trials
+        or {'skip': True}. If None, this parameters is optimized in the trials
 
     Methods
     -------
