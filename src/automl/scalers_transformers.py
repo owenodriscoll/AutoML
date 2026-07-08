@@ -113,13 +113,20 @@ class TransformerChooser:
         self.random_state = random_state
         self.func = QuantileTransformer
         self.func_fitted = None
+        self.skip = skip
 
     def suggest_trial(self):
-        if (self.n_quantiles is None) & (self.output_distribution is None):
+        if self.skip:
+            transform_type = self.trial.suggest_categorical("transformers", [None])
+
+        # if nothing is provided, suggest parameters
+        elif (self.n_quantiles is None) & (self.output_distribution is None):
             transform_type = self.trial.suggest_categorical("transformers", [None, 'quantile_trans'])
             if (not transform_type is None):
                 self.n_quantiles = self.trial.suggest_int('n_quantiles', 100, 4000, step=100)
                 self.output_distribution = self.trial.suggest_categorical('output_distribution', ['uniform', 'normal'])
+        
+        # use provided suggestions
         else: 
             self.n_quantiles = self.trial.suggest_int('n_quantiles', self.n_quantiles, self.n_quantiles, step=100)
             self.output_distribution = self.trial.suggest_categorical('output_distribution', [self.output_distribution])
