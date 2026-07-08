@@ -106,7 +106,7 @@ class ScalerChooser:
 
 
 class TransformerChooser:
-    def __init__(self, n_quantiles: int = None, output_distribution: str = None, trial=None, random_state: int = 42):
+    def __init__(self, n_quantiles: int = None, output_distribution: str = None, trial=None, random_state: int = 42, skip=False):
         self.n_quantiles = n_quantiles
         self.output_distribution = output_distribution
         self.trial = trial
