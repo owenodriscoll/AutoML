@@ -147,7 +147,7 @@ class AutomatedML:
     random_state: int
         The random seed to use, default is 42.
     warning_verbosity: str
-        The warning verbosity to use, default is 'ignore'.
+        The warning verbosity to use, e.g.'ignore','always', default value is 'ignore'.
     show_progress_bar: bool
         Whether to show individual trial results or a progress bar. Defaults to False
     transformer_kwargs: dict, optional (default=None)
@@ -666,6 +666,8 @@ class AutomatedML:
 
                     except Exception as e:
                         result_fold = np.nan
+                        if self.warning_verbosity != 'ignore':
+                            warnings.warn(f"Error: {e}", UserWarning)
                         pass
 
                     # -- store results to assess performance per fraction
