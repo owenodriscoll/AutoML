@@ -42,4 +42,6 @@ class AutomatedRegression(AutomatedML):
                                                         random_state=self.random_state)
         self._models_assess: List[Callable] = regressor_selector(regressor_names=self.models_to_assess,
                                                       random_state=self.random_state)
+
+        self._resolve_training_objectives()
         

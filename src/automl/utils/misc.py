@@ -8,7 +8,7 @@ import numpy as np
 
 def assert_not_lambda(func):
     assert callable(func), f"{func!r} is not callable"
-    assert func.__name__ != "<lambda>", (
+    assert getattr(func, "__name__", None) != "<lambda>", (
         f"Lambda functions are not allowed: {func!r}. "
         "Use a named function defined with 'def'."
     )
