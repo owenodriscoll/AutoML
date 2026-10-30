@@ -13,6 +13,8 @@ import automl
 from automl import AutomatedClassification, AutomatedRegression, CustomLoss
 from automl.automl import AutomatedML
 
+from helpers import n_trials
+
 
 @pytest.fixture
 def regression(regression_data, automl_kwargs):
@@ -105,8 +107,6 @@ def test_default_sampler_and_pruner(regression):
     assert isinstance(regression.pruner, optuna.pruners.HyperbandPruner)
 
 
-@pytest.mark.xfail(reason="BUG: samplers are recognised by module name instead of isinstance, so a subclass defined "
-                          "outside optuna (e.g. from optunahub or optuna-integration) is silently replaced by TPESampler")
 def test_custom_sampler_subclass_is_kept(regression_data, automl_kwargs):
     class MySampler(optuna.samplers.RandomSampler):
         pass
@@ -116,8 +116,6 @@ def test_custom_sampler_subclass_is_kept(regression_data, automl_kwargs):
     assert AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], sampler=sampler)).sampler is sampler
 
 
-@pytest.mark.xfail(reason="BUG: pruners are recognised by module name instead of isinstance, so a custom pruner is "
-                          "silently replaced by HyperbandPruner")
 def test_custom_pruner_subclass_is_kept(regression_data, automl_kwargs):
     class MyPruner(optuna.pruners.MedianPruner):
         pass
@@ -160,7 +158,6 @@ def test_columns_are_converted_to_strings(automl_kwargs):
     assert list(regression.X_train.columns) == ['0', '1'] and list(regression.y_train.columns) == ['0']
 
 
-@pytest.mark.xfail(reason="BUG: column names are converted to strings in place, altering the DataFrames of the user")
 def test_user_data_is_not_modified(automl_kwargs):
     X = pd.DataFrame(np.random.default_rng(0).normal(size=(100, 2)))
     y = pd.DataFrame({0: X[0]})
@@ -242,12 +239,13 @@ def test_rows_of_a_group_stay_together_in_cross_validation(grouped_data, automl_
 
 # -------------------------------------------------- partial fits --------------------------------------------------
 def test_sample_fraction_selects_rows(regression):
-    index = regression._sample_fraction(regression.X_train, .25)
-    assert len(index) == 60 and index.isin(regression.X_train.index).all()
+    positions = regression._sample_fraction(regression.X_train, .25)
+    assert len(positions) == len(set(positions)) == 60
+    assert positions.max() < len(regression.X_train)
 
 
 def test_sample_fraction_is_reproducible(regression):
-    assert regression._sample_fraction(regression.X_train, .5).equals(regression._sample_fraction(regression.X_train, .5))
+    np.testing.assert_array_equal(regression._sample_fraction(regression.X_train, .5), regression._sample_fraction(regression.X_train, .5))
 
 
 def test_sample_fraction_selects_entire_groups(grouped_data, automl_kwargs):
@@ -255,7 +253,7 @@ def test_sample_fraction_selects_entire_groups(grouped_data, automl_kwargs):
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], group_by_index_columns=['group']))
     selected = regression._sample_fraction(regression.X_train, .5)
     assert len(selected) == 8 * 16
-    assert (regression.X_train.loc[selected].groupby(level='group').size() == 8).all()
+    assert (regression.X_train.iloc[selected].groupby(level='group').size() == 8).all()
 
 
 def test_sample_fraction_selects_at_least_one_group(grouped_data, automl_kwargs):
@@ -264,13 +262,14 @@ def test_sample_fraction_selects_at_least_one_group(grouped_data, automl_kwargs)
     assert len(regression._sample_fraction(regression.X_train, 1e-6)) == 8
 
 
-@pytest.mark.xfail(reason="BUG: partial fits select rows by label with .loc, so duplicated index values multiply rows: "
-                          "fractions are larger than requested and rows are repeated")
 def test_partial_fit_with_duplicated_index_selects_requested_fraction(regression_data, automl_kwargs):
     X, y = regression_data
-    regression = AutomatedRegression(y=pd.concat([y, y]), X=pd.concat([X, X]), **automl_kwargs(models_to_optimize=['lassolars']))
+    regression = AutomatedRegression(y=pd.concat([y, y]), X=pd.concat([X, X]), **automl_kwargs(models_to_optimize=['lassolars'], fit_frac=[.5, 1]))
     selected = regression._sample_fraction(regression.X_train, .5)
-    assert len(regression.X_train.loc[selected]) == len(regression.X_train) // 2
+    assert len(regression.X_train.iloc[selected]) == len(regression.X_train) // 2
+
+    regression.model_hyperoptimise()
+    assert n_trials(regression, 'lassolars') == 2
 
 
 # ----------------------------------------------------- storage -----------------------------------------------------

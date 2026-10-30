@@ -49,7 +49,6 @@ def test_function_catcher_silences_stdout_and_warnings_on_ignore(capsys):
     assert not [warning for warning in caught if warning.category is UserWarning]
 
 
-@pytest.mark.xfail(reason="BUG: the os.devnull handle opened to silence stdout is never closed, leaking one per call")
 def test_function_catcher_closes_devnull():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
@@ -76,16 +75,11 @@ def interrupt(value):
     raise KeyboardInterrupt
 
 
-@pytest.mark.xfail(reason="BUG: only Exception is caught, so an interrupted fit leaves sys.stdout on os.devnull, "
-                          "which silences all further output of a notebook session")
 def test_function_catcher_restores_stdout_after_keyboard_interrupt():
     stdout = sys.stdout
-    try:
-        with pytest.raises(KeyboardInterrupt):
-            FuncHelper.function_warning_catcher(interrupt, [1], 'ignore')
-        assert sys.stdout is stdout
-    finally:
-        sys.stdout = stdout
+    with pytest.raises(KeyboardInterrupt):
+        FuncHelper.function_warning_catcher(interrupt, [1], 'ignore')
+    assert sys.stdout is stdout
 
 
 # ------------------------------------- method_warning_catcher -------------------------------------

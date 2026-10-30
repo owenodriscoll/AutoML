@@ -67,8 +67,10 @@ def test_without_model_raises(regression_data, automl_kwargs):
         regression.model_feature_importance()
 
 
-@pytest.mark.xfail(raises=ValueError, reason="BUG: the defaults (200 clusters, 200 test rows) are not limited by the size of the "
-                                             "data, so they crash for any dataset under 1000 rows at test_frac=0.2")
-def test_default_arguments_work_on_small_datasets(regression):
-    values, _ = regression.model_feature_importance(kwargs_shap_plot={'show': False})
+@pytest.mark.parametrize('cluster', [True, False])
+def test_default_arguments_work_on_small_datasets(regression_data, automl_kwargs, cluster):
+    X, y = regression_data
+    regression = AutomatedRegression(y=y.iloc[:100], X=X.iloc[:100], **automl_kwargs(models_to_optimize=['lassolars']))
+    regression.apply()
+    values, _ = regression.model_feature_importance(cluster=cluster, kwargs_shap_plot={'show': False})
     assert len(values) == len(regression.X_test)

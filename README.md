@@ -115,6 +115,8 @@ regression.summary
     
 ```
 
+Failures during optimization do not stop the run: a failing trial or model is skipped and reported with an `OptimisationFailureWarning`, at any `warning_verbosity`. If no model remains, `summary` stays empty.
+
 ## Testing
 
 Install the test dependencies and run the suite from the root of the repository:

@@ -73,7 +73,7 @@ def test_envelope_of_linear_relation(point_cloud):
 
 def test_envelope_quantiles_are_ordered(point_cloud):
     *_, low, mid_low, mid_high, high = envelope(point_cloud.assign(y=np.random.default_rng(0).normal(5, 1, 2000)),
-                                                'x', 'y', 0, 20, steps=5, log=False)
+                                                'x', 'y', 1, 9, steps=5, log=False)
     assert (low <= mid_low).all() and (mid_low <= mid_high).all() and (mid_high <= high).all()
 
 
@@ -88,19 +88,19 @@ def test_envelope_does_not_modify_input(point_cloud):
     assert list(point_cloud.columns) == columns
 
 
-@pytest.mark.xfail(raises=(ValueError, AssertionError), reason="BUG: pandas>=3 defaults to observed=True in groupby, so empty bins are dropped "
-                                                               "and the statistics no longer align with the bin centers")
 def test_envelope_statistics_align_with_bins_when_bins_are_empty():
     frame = pd.DataFrame({'x': [1., 1.1, 9., 9.1], 'y': [1., 1.1, 9., 9.1]})
-    center, median, *_ = envelope(frame, 'x', 'y', 0, 10, steps=11, log=False)
-    assert len(median) == len(center)
+    center, median, count_x, count_y, std, *quantiles = envelope(frame, 'x', 'y', 0, 10, steps=11, log=False)
+    assert all(len(statistic) == len(center) == 10 for statistic in [median, count_x, count_y, std, *quantiles])
+    assert count_x.sum() == 4 and count_x.iloc[5] == 0
+    assert np.isnan(median.iloc[5])
 
 
-@pytest.mark.xfail(raises=ValueError, reason="BUG: as above, the bins from -1 are empty for the absolute values which are binned, so "
-                                             "the plot always fails on x and y lengths. `log=axis_scale == True` also never selects log bins")
-def test_plot_envelope(point_cloud):
-    *_, figure = plot_envelope_single(point_cloud, 'x', 'y', 26, 'title', 'x', 'y', axis_scale='linear', ax_min=.5, ax_max=20)
-    assert len(figure.axes) == 2
+@pytest.mark.parametrize('axis_scale, n_bins', [('linear', 25), ('log', 25)])
+def test_plot_envelope(point_cloud, axis_scale, n_bins):
+    center, *_, figure = plot_envelope_single(point_cloud, 'x', 'y', n_bins + 1, 'title', 'x', 'y', axis_scale=axis_scale, ax_min=.5, ax_max=20)
+    assert len(center) == n_bins and len(figure.axes) == 2
+    assert np.allclose(np.diff(center), np.diff(center)[0]) == (axis_scale == 'linear')
     plt.close(figure)
 
 

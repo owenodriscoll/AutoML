@@ -290,10 +290,10 @@ class AutomatedML:
                           "`group_by_index_columns` is set: rows of the same group may end up in both training and "
                           "validation folds (leakage). Consider GroupKFold.", UserWarning)
 
-        self.sampler = self.sampler if 'optuna.samplers' in type(self.sampler).__module__ else \
+        self.sampler = self.sampler if isinstance(self.sampler, optuna.samplers.BaseSampler) else \
             TPESampler(seed=self.random_state)
 
-        self.pruner = self.pruner if 'optuna.pruners' in type(self.pruner).__module__ else \
+        self.pruner = self.pruner if isinstance(self.pruner, optuna.pruners.BasePruner) else \
             optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
 
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if self.fit_frac is None else self.fit_frac
@@ -348,16 +348,16 @@ class AutomatedML:
         return list(self.cross_validation.split(X, y, groups=self._loss.group_labels(X.index)))
 
 
-    def _sample_fraction(self, X: pd.DataFrame, frac: float) -> pd.Index:
-        """Index of a random fraction of X. When grouping applies, entire groups are sampled."""
+    def _sample_fraction(self, X: pd.DataFrame, frac: float) -> np.ndarray:
+        """Positions of a random fraction of the rows of X. When grouping applies, entire groups are sampled."""
         if not self._loss.is_grouped:
-            return X.sample(frac=frac, random_state=self.random_state).index
+            return X.reset_index(drop=True).sample(frac=frac, random_state=self.random_state).index.to_numpy()
 
         labels = self._loss.group_labels(X.index)
         unique_labels = np.unique(labels)
         n_sample = max(1, int(round(len(unique_labels) * frac)))
         sampled = np.random.default_rng(self.random_state).choice(unique_labels, size=n_sample, replace=False)
-        return X.index[np.isin(labels, sampled)]
+        return np.flatnonzero(np.isin(labels, sampled))
 
 
     def _build_model(self, model_name: str, model_with_parameters, transformer=None):
@@ -413,8 +413,8 @@ class AutomatedML:
         if type(self.X) == np.ndarray: self.X = pd.DataFrame(self.X)
         if type(self.y) == pd.core.series.Series: self.y = self.y.to_frame()
         if type(self.X) == pd.core.series.Series: self.X = self.X.to_frame()
-        self.y.columns = self.y.columns.astype(str)
-        self.X.columns = self.X.columns.astype(str)
+        self.y = self.y.set_axis(self.y.columns.astype(str), axis=1)
+        self.X = self.X.set_axis(self.X.columns.astype(str), axis=1)
 
         # -- find and warn if non-numeric columns match
         non_numeric_columns = (~self.X.map(np.isreal).any(axis = 0))
@@ -708,15 +708,15 @@ class AutomatedML:
                     fold_y_train = self.y_train.iloc[fold[0]]
                     fold_y_test = self.y_train.iloc[fold[1]]
 
-                    # -- retrieve indexes belonging to fraction of the fold (entire groups if grouping applies)
+                    # -- retrieve positions belonging to fraction of the fold (entire groups if grouping applies)
                     idx_partial_fit_train = self._sample_fraction(fold_X_train, partial_fit_frac)
                     idx_partial_fit_test = self._sample_fraction(fold_X_test, partial_fit_frac)
 
                     # -- select fraction of fold
-                    fold_X_train_frac = fold_X_train.loc[idx_partial_fit_train]
-                    fold_X_test_frac = fold_X_test.loc[idx_partial_fit_test]
-                    fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
-                    fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
+                    fold_X_train_frac = fold_X_train.iloc[idx_partial_fit_train]
+                    fold_X_test_frac = fold_X_test.iloc[idx_partial_fit_test]
+                    fold_y_train_frac = fold_y_train.iloc[idx_partial_fit_train]
+                    fold_y_test_frac = fold_y_test.iloc[idx_partial_fit_test]
 
                     # -- determine if model is  boosted model
                     if  self._early_stopping_permitted: 
@@ -1102,9 +1102,9 @@ class AutomatedML:
         Parameters
         ----------
         n_train_points: int, default=200
-            number of training observations (or clusters) for to use in explaining the model
+            number of training observations (or clusters) for to use in explaining the model, at most those available
         n_test_points: int, default=200
-            number of test observations for which to assess feature importance
+            number of test observations for which to assess feature importance, at most those available
         cluster: bool, default=True
             whether to cluster the training data. If not individual points are chosen to create explainer 
             
@@ -1129,6 +1129,9 @@ class AutomatedML:
                 
             except:
                 raise Exception(f"No trained model available in write_folder: {self.write_folder}")
+
+        n_train_points = min(n_train_points, len(self.X_train))
+        n_test_points = min(n_test_points, len(self.X_test))
 
         # -- cluster the training data to speed up, otherwise randomly sample training data
         if cluster:
