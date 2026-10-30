@@ -128,7 +128,12 @@ pytest --cov            # with coverage, fails below the threshold in pyproject.
 pytest -rx              # lists the known bugs
 ```
 
-The same suite runs on GitHub Actions for pushes to `main` and `dev`, for pull requests, and weekly, as dependencies are not pinned and new releases can break the package without any change here.
+GitHub Actions runs on every pull request, on pushes to `main` and `dev`, and weekly, as dependencies are not pinned and new releases can break the package without any change here. Each run, on Python 3.11 and 3.12:
+
+1. builds the package, installs it in a clean environment without test dependencies, checks for dependency conflicts and runs it (`.github/smoke_test.py`)
+2. runs the test suite with coverage
+
+The `CI passed` check combines these results, and is the one to require in the branch rules of the repository.
 
 An `OptimisationFailureWarning` fails a test unless the test expects it with `pytest.warns`. A failing trial only warns, so a test would otherwise pass on a broken model.
 

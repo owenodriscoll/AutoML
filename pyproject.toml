@@ -21,7 +21,9 @@ dependencies = [
   "optuna",
   "scikit-learn",
   "numpy",
-  
+  "scipy",
+  "matplotlib",
+
   # this pandas version is needed to prevent errors in grouping by index
   "pandas>=3.0.0",
   "SQLAlchemy",
@@ -32,6 +34,8 @@ dependencies = [
   # these are needed for watermarking package versions
   "tomli",
   "watermark",
+  "ipython",
+  "packaging",
 
   # for pickling custom scorers
   "cloudpickle",
