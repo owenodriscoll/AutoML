@@ -225,7 +225,7 @@ def test_run_without_any_usable_model_warns_rather_than_raises(regression_data, 
     assert regression.summary is None
 
 
-def test_library_errors_fail_a_trial_rather_than_the_study(regression_data, automl_kwargs):
+def test_library_errors_end_a_trial_rather_than_the_study(regression_data, automl_kwargs):
     import lightgbm
 
     class LibraryError(RegressorMixin, BaseEstimator):
@@ -241,8 +241,36 @@ def test_library_errors_fail_a_trial_rather_than_the_study(regression_data, auto
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lightgbm'], n_trial=2))
     regression._models_optimize = {'lightgbm': (LibraryError, lambda trial: {})}
-    regression.model_hyperoptimise()
-    assert [t.state for t in study_of(regression, 'lightgbm').trials] == [optuna.trial.TrialState.FAIL] * 2
+    with pytest.warns(OptimisationFailureWarning, match="2 of the trials of 'lightgbm' failed.*no usable features"):
+        regression.model_hyperoptimise()
+
+    trials = study_of(regression, 'lightgbm').trials
+    assert [t.state for t in trials] == [optuna.trial.TrialState.PRUNED] * 2
+    assert all('no usable features' in t.user_attrs['failure'] for t in trials)
+
+
+def test_sampler_moves_away_from_settings_that_fail(regression_data, automl_kwargs):
+    class FailsOnHighValues(RegressorMixin, BaseEstimator):
+        def __init__(self, value=0., other=0.):
+            self.value = value
+            self.other = other
+
+        def fit(self, X, y):
+            if self.value > .65:
+                raise ValueError('settings cannot be fitted')
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), self.value + self.other)
+
+    X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], n_trial=40))
+    regression._models_optimize = {'fails': (FailsOnHighValues, lambda trial: {name: trial.suggest_float(name, 0, 1) for name in ('value', 'other')})}
+    with pytest.warns(OptimisationFailureWarning, match='settings cannot be fitted'):
+        regression.model_hyperoptimise()
+
+    trials = study_of(regression, 'fails').trials
+    assert sum('failure' in t.user_attrs for t in trials) < len(trials) / 2
 
 
 def test_small_dataset_assesses_the_last_fraction(regression_data, automl_kwargs):
@@ -332,6 +360,22 @@ def test_selected_pipeline_reproduces_best_trial_score(regression_data, automl_k
     assert np.mean(scores) == pytest.approx(study_of(regression, 'histgradientboost').best_value)
 
 
+def test_parameter_stored_by_earlier_versions_does_not_reach_the_model(regression_data, automl_kwargs):
+    X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['gradientboost']))
+    model, create_params = regression._models_optimize['gradientboost']
+
+    def with_stored_criterion(trial):
+        trial.suggest_categorical('criterion', ['squared_error'])
+        return create_params(trial)
+
+    regression._models_optimize = {'gradientboost': (model, with_stored_criterion)}
+    regression.model_hyperoptimise()
+    regression.model_select_best()
+    assert 'criterion' in completed_trials(regression, 'gradientboost')[0].params
+    assert final_model(regression).regressor.get_params().get('criterion') != 'squared_error'
+
+
 def test_weak_models_are_added(regression_data, automl_kwargs):
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], n_trial=6, n_weak_models=2))
@@ -411,7 +455,8 @@ def test_model_with_only_failed_trials_is_skipped(regression_data, automl_kwargs
 
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], metric_optimise=always_invalid))
-    regression.model_hyperoptimise()
+    with pytest.warns(OptimisationFailureWarning, match="2 of the trials of 'lassolars' failed.*score of the trial is nan"):
+        regression.model_hyperoptimise()
     regression.model_select_best()
     assert regression.estimators == [] and "No completed trials" in capsys.readouterr().out
 
@@ -751,6 +796,18 @@ def test_training_objective_reaches_final_models(regression_data, automl_kwargs)
     assert not isinstance(dict(regression.estimators)['lassolars_best'].named_steps['model'].transformer, TargetCenterer)
 
 
+def test_custom_objective_with_settings_that_leave_no_split(regression_data, automl_kwargs):
+    """More samples per leaf than half of the rows, on which a custom objective can crash LightGBM."""
+    loss = CustomLoss(std_difference, grad_hess=squared_error_grad_hess)
+    X, y = regression_data
+    regression = AutomatedRegression(y=y.iloc[:100], X=X.iloc[:100], **automl_kwargs(
+        models_to_optimize=['lightgbm'], metric_optimise=loss, optimisation_direction='minimize'))
+    model, create_params = regression._models_optimize['lightgbm']
+    regression._models_optimize = {'lightgbm': (model, lambda trial: {**create_params(trial), 'min_child_samples': 100})}
+    regression.model_hyperoptimise()
+    assert completed_trials(regression, 'lightgbm')
+
+
 @pytest.mark.slow
 def test_custom_objective_changes_what_is_learned(regression_data, automl_kwargs, tmp_path):
     def quantile_grad_hess(y_true, y_pred):  # -- pinball loss at 0.9: predictions shift to upper part of the data
@@ -778,7 +835,7 @@ def test_grouped_regression_with_early_stopping(grouped_data, automl_kwargs, mod
             models_to_optimize=[model_name], group_by_index_columns=['group'], agg_func=agg_func, boosted_early_stopping_rounds=3,
             test_frac=.5))
     regression.apply()
-    assert completed_trials(regression, model_name)  # -- some parameters legitimately fail on 3 features in LightGBM
+    assert completed_trials(regression, model_name)
     assert np.isfinite(regression.summary['stacked'][-1][0])
 
 

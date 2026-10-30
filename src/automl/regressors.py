@@ -93,10 +93,11 @@ def lightgbm_loader(random_state):
         param_dict['bagging_fraction'] = trial.suggest_float('bagging_fraction', 0.1, 1.0)
         param_dict['bagging_freq'] = trial.suggest_int('bagging_freq', 1, 7)
         param_dict['min_child_samples'] = trial.suggest_int('min_child_samples', 1, 100)
+        param_dict['feature_pre_filter'] = trial.suggest_categorical("feature_pre_filter", [False])  # custom objectives crash on a model without splits otherwise
         param_dict['random_state'] = trial.suggest_categorical("random_state", [random_state])
         param_dict['verbosity'] = trial.suggest_categorical("verbosity", [-1])
         return param_dict
-    
+
     return (LGBMRegressor, lightgbmHParams)
 
 def xgboost_loader(random_state):
@@ -224,7 +225,6 @@ def gradientboost_loader(random_state):
         param_dict['learning_rate'] = trial.suggest_float("learning_rate", 1e-2, 1e0, log = True)
         param_dict['subsample'] = trial.suggest_float("subsample", 1e-2, 1.0, log = False)
         param_dict['max_depth'] = trial.suggest_int("max_depth", 1, 10)
-        param_dict['criterion'] = trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error'])
         param_dict['loss'] = trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'huber', 'quantile'])
         param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20])
         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])

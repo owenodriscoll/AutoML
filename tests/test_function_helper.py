@@ -135,6 +135,7 @@ def test_failure_warning_is_not_a_user_warning():
 
 
 def test_method_catcher_restores_warning_filters():
-    filters = list(warnings.filters)
-    Worker('ignore').crash()
-    assert warnings.filters == filters
+    with pytest.warns(OptimisationFailureWarning, match='crashed'):
+        filters = list(warnings.filters)
+        Worker('ignore').crash()
+        assert warnings.filters == filters

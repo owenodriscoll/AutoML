@@ -7,7 +7,7 @@ from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
 from sklearn.model_selection import GroupKFold, KFold
 from sklearn.preprocessing import QuantileTransformer
 
-from automl import AutomatedRegression, AutomatedClassification, CustomLoss, LossFallbackWarning
+from automl import AutomatedRegression, AutomatedClassification, CustomLoss, LossFallbackWarning, OptimisationFailureWarning
 from automl.loss import LossHandler, GradHessObjective, squared_error_grad_hess, TargetCenterer
 from automl.estimators import LossAwarePipeline, LossAwareTransformedTargetRegressor
 from automl.stacking import LossStackingRegressor
@@ -248,7 +248,8 @@ def test_classification_end_to_end(tmp_path):
     classification = AutomatedClassification(y=y, X=X, **automl_kwargs(
         tmp_path, metric_optimise=CustomLoss(log_loss, needs_proba=True), optimisation_direction='minimize',
         models_to_optimize=['lightgbm', 'svc'], boosted_early_stopping_rounds=5))
-    classification.apply()
+    with pytest.warns(OptimisationFailureWarning, match="of the trials of 'svc' failed"):  # -- has no `predict_proba`
+        classification.apply()
     assert np.isfinite(classification.summary['stacked'][-1][0])
 
 

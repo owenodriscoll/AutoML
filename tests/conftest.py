@@ -11,6 +11,13 @@ from sklearn.datasets import make_classification
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
+def pytest_collection_modifyitems(items):
+    """A failing trial only warns, so that a test would otherwise pass on a broken model.
+    Set per test, as a filter in pyproject.toml imports the package before coverage starts measuring."""
+    for item in items:
+        item.add_marker(pytest.mark.filterwarnings('error::automl.utils.function_helper.OptimisationFailureWarning'))
+
+
 @pytest.fixture(autouse=True)
 def isolated_working_directory(tmp_path, monkeypatch):
     """Models write to the working directory (e.g. catboost_info/), keep this out of the repository."""

@@ -115,7 +115,7 @@ regression.summary
     
 ```
 
-Failures during optimization do not stop the run: a failing trial or model is skipped and reported with an `OptimisationFailureWarning`, at any `warning_verbosity`. If no model remains, `summary` stays empty.
+Failures during optimization do not stop the run: a failing trial or model is skipped and reported with an `OptimisationFailureWarning`, at any `warning_verbosity`. Failing trials are stored as pruned, with the reason in their `failure` user attribute, so that the sampler moves away from those settings. If no model remains, `summary` stays empty.
 
 ## Testing
 
@@ -129,6 +129,8 @@ pytest -rx              # lists the known bugs
 ```
 
 The same suite runs on GitHub Actions for pushes to `main` and `dev`, for pull requests, and weekly, as dependencies are not pinned and new releases can break the package without any change here.
+
+An `OptimisationFailureWarning` fails a test unless the test expects it with `pytest.warns`. A failing trial only warns, so a test would otherwise pass on a broken model.
 
 Known bugs are recorded as `@pytest.mark.xfail(reason="BUG: ...")` tests describing the correct behaviour. These are strict: after fixing a bug its test fails as `XPASS(strict)` until the marker is removed.
 

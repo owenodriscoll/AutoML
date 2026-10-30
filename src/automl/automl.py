@@ -500,8 +500,9 @@ class AutomatedML:
             The method uses the `_create_objective` function to create the objective function that is optimized by Optuna.
             The final study iteration is saved using cloudpickle.
 
-            Failures do not stop the optimization: a failing trial is recorded as failed and a failing model is
-            skipped, both are reported with an OptimisationFailureWarning.
+            Failures do not stop the optimization: a failing trial is recorded as pruned, with the reason in its
+            `failure` user attribute, and a failing model is skipped. Both are reported with an
+            OptimisationFailureWarning.
             """
 
             for model_name, (model, create_params) in self._models_optimize.items():
@@ -658,15 +659,22 @@ class AutomatedML:
             else:
                 wrapped_objective=_objective
 
-            # -- specific hyperparameters can fail (e.g. LightGBM finding no usable features), which only ends the trial
+            # -- specific hyperparameters can fail, which only ends the trial. It is reported as pruned, since the
+            # TPE sampler ignores failed trials and would keep returning to the settings that fail
             def _objective_recording_errors(trial):
                 try:
-                    return wrapped_objective(trial)
+                    value = wrapped_objective(trial)
+                    if np.isfinite(value):
+                        return value
+                    error = ValueError(f"score of the trial is {value}")
                 except optuna.TrialPruned:
                     raise
                 except Exception as e:
-                    trial_errors.append(e)
-                    raise
+                    error = e
+
+                trial_errors.append(error)
+                trial.set_user_attr('failure', repr(error))
+                raise optuna.TrialPruned() from error
 
             return _objective_recording_errors
 
@@ -844,9 +852,10 @@ class AutomatedML:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
                 continue
             
-            # -- parameters of the trials not belonging to the model
+            # -- parameters of the trials not belonging to the model, `criterion` is left in studies of earlier versions
+            # but is removed from gradient boosting in scikit-learn 1.11
             list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
-                                         'transformers', 'n_quantiles', 'output_distribution']
+                                         'transformers', 'n_quantiles', 'output_distribution', 'criterion']
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
