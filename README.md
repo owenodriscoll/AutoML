@@ -115,6 +115,21 @@ regression.summary
     
 ```
 
+## Testing
+
+Install the test dependencies and run the suite from the root of the repository:
+```
+python3 -m pip install -e ".[test]"
+pytest                  # everything, a few minutes
+pytest -m "not slow"    # quick subset, excludes exhaustive tests of all models and settings
+pytest --cov            # with coverage, fails below the threshold in pyproject.toml
+pytest -rx              # lists the known bugs
+```
+
+The same suite runs on GitHub Actions for pushes to `main` and `dev`, for pull requests, and weekly, as dependencies are not pinned and new releases can break the package without any change here.
+
+Known bugs are recorded as `@pytest.mark.xfail(reason="BUG: ...")` tests describing the correct behaviour. These are strict: after fixing a bug its test fails as `XPASS(strict)` until the marker is removed.
+
 ## Custom losses
 
 The loss passed as `metric_optimise` is used in every stage of the learning:
