@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os
-import sys
 import pickle
 import random
 import optuna
@@ -14,28 +13,28 @@ from typing import Callable, Union, List, Dict, Any
 from sqlalchemy import create_engine
 from optuna.samplers import TPESampler
 
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupKFold, GroupShuffleSplit, StratifiedGroupKFold, \
+    LeaveOneGroupOut, LeavePGroupsOut
 from sklearn.metrics import make_scorer
-from sklearn.compose import TransformedTargetRegressor
 from sklearn.cluster import KMeans
-from sklearn.pipeline import Pipeline
 from sklearn.ensemble import StackingRegressor, StackingClassifier
-from sklearn.linear_model import RidgeCV, RidgeClassifierCV
+from sklearn.linear_model import LogisticRegressionCV, RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
-from sklearn.multioutput import MultiOutputRegressor
 
 from .multi_output import MultiOutputStackingRegressor
+from .loss import CustomLoss, LossHandler, TargetCenterer
+from .estimators import LossAwarePipeline, LossAwareTransformedTargetRegressor, EvalSetMultiOutputRegressor, \
+    LabelEncodedClassifier
+from .stacking import LossStackingRegressor, LossStackingClassifier
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
-from .utils.function_helper import FuncHelper
+from .utils.function_helper import FuncHelper, OptimisationFailureWarning
 from .utils.grouped_train_test_splitter import groupwise_train_test_split
-from .utils.misc import assert_not_lambda
 
 # --------------- TODO LIST ---------------
 # FIXME add encoding for clustering of feature importance 
 # FIXME make timeout_trial compatible with catboost
 
-# TODO Validate models for multi-output compatibility
 # TODO Separate transformers per target?
 # TODO try polynomial features with interactions_only = True, include_bias = False
 # TODO add option to overwrite study instead of only coninuing previous available studies
@@ -48,7 +47,9 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 NoneType = type(None)
 
 models_with_early_stopping = ['xgboost', 'catboost', 'lightgbm']
-models_without_native_multioutput = ['bayesianridge', 'xgboost', 'catboost', 'lightgbm']
+models_without_native_multioutput = ['bayesianridge', 'xgboost', 'catboost', 'lightgbm', 'adaboost', 'gradientboost',
+                                     'histgradientboost', 'sgd', 'svr']
+group_aware_cross_validators = (GroupKFold, GroupShuffleSplit, StratifiedGroupKFold, LeaveOneGroupOut, LeavePGroupsOut)
 
 
 @dataclass
@@ -87,7 +88,12 @@ class AutomatedML:
         may complete before Trial 4 and therefore Trial 10 cannot incorporate information of Trial 4 in the
         selection of its hyperparameters.         
     cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
-        The cross-validation object to use for evaluation of models.
+        The cross-validation object to use for evaluation of models. When `group_by_index_columns` is set the
+        default is GroupKFold with 5 splits and shuffling, such that all rows of a group are kept in the same
+        fold (preventing leakage between training and validation folds). Targets and groups are passed to `split`.
+        Splitters need not place every row in one test fold (e.g. TimeSeriesSplit, GroupShuffleSplit) when
+        `stacking_meta_learner` is 'loss': rows in several test folds average their out-of-fold predictions and
+        rows in none do not contribute to the stacking weights. 'ridge' requires every row in exactly one test fold.
     sampler: callable, optional (default=TPESampler with seed=random_state)
         The sampler object to use for optimization of hyperparameters.
     pruner: callable, optional (default=HyperbandPruner with min_resource=1, max_resource='auto', reduction_factor=3)
@@ -100,14 +106,20 @@ class AutomatedML:
         DEPRECIATED
     pca_value: int, float, dict, optional (default=None).
         The PCA transformation to apply to the data, if any. E.g. {'n_components': 0.95, 'whiten'=False}
-    metric_optimise: callable, optional (default=median_absolute_error for regression, accuracy_score for classification)
-        The metric to use for optimization of hyperparameters. For multi-output, this metric should handle 
-        (y_true, y_pred) where both are DataFrames/arrays with shape (n_samples, n_targets). The metric should 
-        return a single scalar combining all targets (e.g., RMSE of ratios, weighted MSE, etc.).
+    metric_optimise: callable or CustomLoss, optional (default=r2_score for regression, accuracy_score for classification)
+        The loss used throughout the learning: for optimization of hyperparameters, as evaluation metric for
+        early stopping of boosted models, as training objective of boosted regression models, by the stacking
+        meta-learner and in the evaluation summary. A callable (y_true, y_pred) -> float is wrapped in a
+        CustomLoss; pass a CustomLoss to additionally supply its gradient and hessian (`grad_hess`) for training,
+        or to indicate that it requires class probabilities (`needs_proba`). See `automl.CustomLoss`.
+        For multi-output, this metric should handle (y_true, y_pred) where both are DataFrames/arrays with
+        shape (n_samples, n_targets). The metric should return a single scalar combining all targets
+        (e.g., RMSE of ratios, weighted MSE, etc.).
         NOTE this metric must be pickle-able (lambda functions are non-pickleable)
     metric_assess: list of callables, optional (default=[median_absolute_error, r2_score])
         The metrics to use for assessment of models. For multi-output, these should handle multi-output predictions.
-    optimisation_direction: str, optional (default='minimize')
+        When grouping is applied, these metrics are calculated on the group aggregates.
+    optimisation_direction: str, optional (default='maximize')
         The direction to optimize the hyperparameters, either 'minimize' or 'maximize'.
     write_folder: str, optional (default='/AUTOML/' in the current working directory)
         The folder where to write the results and models.
@@ -119,6 +131,12 @@ class AutomatedML:
     overwrite_stacked_model: bool, optional (default=False)
         Whether to overwrite the final stacked model if one already exists. 
         The stacked model can still be accessed under `self._model_final` after running `model_evaluate`
+    stacking_meta_learner: str, optional (default='loss')
+        Meta-learner combining the selected models into the stacked model. 'loss' combines the models with
+        non-negative weights (per target) chosen to directly optimise `metric_optimise` (including grouping and
+        multi-output losses) on out-of-fold predictions. 'ridge' uses RidgeCV (RidgeClassifierCV, or
+        LogisticRegressionCV for losses with `needs_proba`), where `metric_optimise` only selects the regularisation
+        strength.
     models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
         The list of names of models to optimize, varies depending on whether objective is regression or classification.
         Check documentation of AutomatedML children classes for details
@@ -129,7 +147,8 @@ class AutomatedML:
         Lower values may be faster but yield less complex (and therefore perhaps worse) tuned models. 
         Higher values generally results in longer optimization time per model but more models pruned. 
         Early stopping not yet included for sklearn's GradientBoost and HistGradientBoost.
-        For multi-output, early stopping uses the combined metric_optimise loss.
+        Early stopping evaluates `metric_optimise` (on group aggregates if grouping applies). For multi-output,
+        models wrapped per target cannot evaluate the combined loss and early-stop on their default metric.
     nominal_columns: list of Union[int, float, string)]
         Column headers of input DataFrame. These columns will be treated as containing nominal categorical columns
         Nominal columns contain unranked categories e.g. classes of weather type
@@ -137,8 +156,12 @@ class AutomatedML:
         Column headers of input DataFrame. These columns will be treated as containing ordinal categorical columns.
         Ordinal columns contain ranked categories e.g. hours of the day
     group_by_index_columns: list of string, optional, default=None)
-        Column names of multi-indexes for grouping of results. For multi-output, grouping is applied
-        on the combined metric_optimise loss.
+        Column names of multi-indexes for grouping of results. Targets and predictions are aggregated per group
+        with `agg_func` before calculating the loss, in all stages: hyperparameter optimization, early stopping,
+        training of boosted regression models (if `agg_func` is 'mean' or 'sum'), stacking and evaluation.
+        Models are thereby constrained to fit the targets on the scale of the groups, while deviations within
+        groups are only constrained by regularisation. The train-test split and cross-validation keep groups
+        together. For multi-output, grouping is applied on the combined metric_optimise loss.
     agg_func: str, callable, optional (default='mean')
         The aggregation function to use for grouping of results. If str, must be a valid pandas aggregation function.
         If callable, must be a valid callable function that takes a pandas DataFrame and returns a pandas DataFrame.
@@ -147,7 +170,8 @@ class AutomatedML:
     random_state: int
         The random seed to use, default is 42.
     warning_verbosity: str
-        The warning verbosity to use, e.g.'ignore','always', default value is 'ignore'.
+        The warning verbosity to use, e.g.'ignore','always', default value is 'ignore'. Failures during optimisation
+        do not stop the run and are always reported, with an OptimisationFailureWarning.
     show_progress_bar: bool
         Whether to show individual trial results or a progress bar. Defaults to False
     transformer_kwargs: dict, optional (default=None)
@@ -208,13 +232,14 @@ class AutomatedML:
     spline_value: Union[int, float, dict, None] = None
     pca_value: Union[int, float, dict, None] = None
     fourrier_value: int = None
-    metric_optimise: Callable = None
+    metric_optimise: Callable | CustomLoss = None
     metric_assess: List[Callable] = None
     optimisation_direction: str = 'maximize'
     write_folder: str = os.getcwd() + '/AUTOML/'
     reload_study: bool = False
     reload_trial_cap: bool = False
     overwrite_stacked_model: bool = False
+    stacking_meta_learner: str = 'loss'
     boosted_early_stopping_rounds: int = None
     nominal_columns: Union[List[str], None] = None
     ordinal_columns: Union[List[str], None] = None
@@ -242,21 +267,33 @@ class AutomatedML:
     _shuffle: bool = True
     _stratify: pd.DataFrame = None
     _model_final = None
+    _loss: LossHandler = None
     _timeout_trial_default = 100
 
 
     # -- conditionally mutate __init__ and call initialization functions
     def __post_init__(self):
-        
-        assert_not_lambda(self.metric_optimise)
 
-        self.cross_validation = self.cross_validation if 'split' in dir(self.cross_validation) else \
-            KFold(n_splits=5, shuffle=True, random_state=self.random_state)
+        # -- wrap plain metric in CustomLoss, which among others asserts that the metric is not a lambda
+        if not isinstance(self.metric_optimise, CustomLoss):
+            self.metric_optimise = CustomLoss(metric=self.metric_optimise)
 
-        self.sampler = self.sampler if 'optuna.samplers' in type(self.sampler).__module__ else \
+        assert self.stacking_meta_learner in ['loss', 'ridge'], "`stacking_meta_learner` must be 'loss' or 'ridge'"
+
+        # -- keep groups together in cross-validation folds to prevent leakage between training and validation
+        is_grouped = isinstance(self.group_by_index_columns, list)
+        if 'split' not in dir(self.cross_validation):
+            self.cross_validation = GroupKFold(n_splits=5, shuffle=True, random_state=self.random_state) if is_grouped \
+                else KFold(n_splits=5, shuffle=True, random_state=self.random_state)
+        elif is_grouped and not isinstance(self.cross_validation, group_aware_cross_validators):
+            warnings.warn(f"`cross_validation` {type(self.cross_validation).__name__} is not group-aware while "
+                          "`group_by_index_columns` is set: rows of the same group may end up in both training and "
+                          "validation folds (leakage). Consider GroupKFold.", UserWarning)
+
+        self.sampler = self.sampler if isinstance(self.sampler, optuna.samplers.BaseSampler) else \
             TPESampler(seed=self.random_state)
 
-        self.pruner = self.pruner if 'optuna.pruners' in type(self.pruner).__module__ else \
+        self.pruner = self.pruner if isinstance(self.pruner, optuna.pruners.BasePruner) else \
             optuna.pruners.HyperbandPruner(min_resource=1, max_resource='auto', reduction_factor=3)
 
         self.fit_frac = [0.1, 0.2, 0.3, 0.4, 0.6, 1] if self.fit_frac is None else self.fit_frac
@@ -279,6 +316,65 @@ class AutomatedML:
 
         if self.transformer_kwargs is None:
             self.transformer_kwargs = {}
+
+        self._loss = LossHandler(
+            loss=self.metric_optimise,
+            greater_is_better=self.optimisation_direction == 'maximize',
+            group_by_index_columns=self.group_by_index_columns,
+            agg_func=self.agg_func,
+            ml_objective=self._ml_objective,
+            is_multioutput=self._is_multioutput,
+            )
+
+        # -- checked here rather than failing in the stacking, after all models have been optimised
+        if self.stacking_meta_learner == 'ridge':
+            test_rows = np.concatenate([test for _, test in self._cv_splits(self.X_train, self.y_train)])
+            assert np.array_equal(np.sort(test_rows), np.arange(len(self.X_train))), (
+                f"stacking_meta_learner 'ridge' requires each row to be in exactly one test fold, which "
+                f"{type(self.cross_validation).__name__} does not provide. Use stacking_meta_learner='loss'.")
+
+
+    def _resolve_training_objectives(self):
+        """
+        Determines the training objective per model, warning where the loss cannot be used for training.
+        Called by the child classes once the models are known.
+        """
+        model_names = list(dict.fromkeys([*(self._models_optimize or {}), *(self._models_assess or {})]))
+        self._loss.resolve_objectives(model_names)
+
+
+    def _cv_splits(self, X: pd.DataFrame, y: pd.DataFrame = None) -> list:
+        """Cross-validation splits of X, passing the targets (for stratification) and, when grouping applies, the groups."""
+        return list(self.cross_validation.split(X, y, groups=self._loss.group_labels(X.index)))
+
+
+    def _sample_fraction(self, X: pd.DataFrame, frac: float) -> np.ndarray:
+        """Positions of a random fraction of the rows of X. When grouping applies, entire groups are sampled."""
+        if not self._loss.is_grouped:
+            return X.reset_index(drop=True).sample(frac=frac, random_state=self.random_state).index.to_numpy()
+
+        labels = self._loss.group_labels(X.index)
+        unique_labels = np.unique(labels)
+        n_sample = max(1, int(round(len(unique_labels) * frac)))
+        sampled = np.random.default_rng(self.random_state).choice(unique_labels, size=n_sample, replace=False)
+        return np.flatnonzero(np.isin(labels, sampled))
+
+
+    def _build_model(self, model_name: str, model_with_parameters, transformer=None):
+        """
+        Wraps a model for multi-output (if needed) and target transformation (regression). When the model
+        trains on a custom objective the target is only centered, see loss.TargetCenterer.
+        """
+        if self._ml_objective == 'classification':
+            return LabelEncodedClassifier(model_with_parameters) if model_name == 'xgboost' else model_with_parameters
+
+        if self._loss.needs_per_target_wrapper(model_name, model_name in models_without_native_multioutput):
+            model_with_parameters = EvalSetMultiOutputRegressor(model_with_parameters)
+
+        if self._loss.uses_custom_objective(model_name):
+            transformer = TargetCenterer()
+
+        return LossAwareTransformedTargetRegressor(regressor=model_with_parameters, transformer=transformer)
 
 
     def create_dir(self):
@@ -317,8 +413,8 @@ class AutomatedML:
         if type(self.X) == np.ndarray: self.X = pd.DataFrame(self.X)
         if type(self.y) == pd.core.series.Series: self.y = self.y.to_frame()
         if type(self.X) == pd.core.series.Series: self.X = self.X.to_frame()
-        self.y.columns = self.y.columns.astype(str)
-        self.X.columns = self.X.columns.astype(str)
+        self.y = self.y.set_axis(self.y.columns.astype(str), axis=1)
+        self.X = self.X.set_axis(self.X.columns.astype(str), axis=1)
 
         # -- find and warn if non-numeric columns match
         non_numeric_columns = (~self.X.map(np.isreal).any(axis = 0))
@@ -403,73 +499,75 @@ class AutomatedML:
             
             The method uses the `_create_objective` function to create the objective function that is optimized by Optuna.
             The final study iteration is saved using cloudpickle.
-            """
 
-            # -- if catboost is loaded prepare special catch for common catboost errors
-            if 'catboost' in list(self._models_optimize.keys()):
-                import catboost
-                catch = (catboost.CatBoostError,)
-            else:
-                catch = ( )
+            Failures do not stop the optimization: a failing trial is recorded as pruned, with the reason in its
+            `failure` user attribute, and a failing model is skipped. Both are reported with an
+            OptimisationFailureWarning.
+            """
 
             for model_name, (model, create_params) in self._models_optimize.items():
 
-                # -- create SQL database to store study results
-                dir_study_db = f"{self.write_folder}{model_name}.db"
-                dir_study_db_url = f"sqlite:///{dir_study_db}"
-                dir_sampler = f"{self.write_folder_sampler}{model_name}_sampler.pkl"
+                try:
+                    # -- create SQL database to store study results
+                    dir_study_db = f"{self.write_folder}{model_name}.db"
+                    dir_study_db_url = f"sqlite:///{dir_study_db}"
+                    dir_sampler = f"{self.write_folder_sampler}{model_name}_sampler.pkl"
 
-                # -- check whether database already exists in which case should ...
-                # ... use previous instance of sampler. Not necessary for pruner (#!!! really?)
-                if os.path.exists(dir_sampler):
-                    study_sampler = pickle.load(open(dir_sampler, "rb"))
+                    # -- check whether database already exists in which case should ...
+                    # ... use previous instance of sampler. Not necessary for pruner (#!!! really?)
+                    if os.path.exists(dir_sampler):
+                        study_sampler = pickle.load(open(dir_sampler, "rb"))
 
-                    # -- skip model if database already exists but reloading not permitted
-                    if not self.reload_study:
-                        message = [f"Study `{self._ml_objective}_{model_name}` already exists but `reload_study == False` -- > " +
-                              "model skipped. \nSet `reload_study = True` to continue on existing study."]
+                        # -- skip model if database already exists but reloading not permitted
+                        if not self.reload_study:
+                            message = [f"Study `{self._ml_objective}_{model_name}` already exists but `reload_study == False` -- > " +
+                                  "model skipped. \nSet `reload_study = True` to continue on existing study."]
 
-                        # -- temporarily revert printing permission to notify of skipped model
-                        FuncHelper.function_warning_catcher(
-                            lambda x: print(x, flush=True), # flush = True prevents buffering of print statement
-                            message,
-                            new_warning_verbosity = 'default',
-                            old_warning_verbosity = 'ignore',
-                            new_std_error = sys.__stdout__
-                            )
-                        continue
+                            # -- printed to the regular stdout (sys.__stdout__ is invisible in notebooks),
+                            # flush = True prevents buffering of print statement
+                            print(message[0], flush=True)
+                            continue
 
-                else:
-                    study_sampler = self.sampler
-                    create_engine(dir_study_db_url)
+                    else:
+                        study_sampler = self.sampler
+                        create_engine(dir_study_db_url)
 
-                # -- create study or reload previous
-                study = optuna.create_study(study_name=f"{self._ml_objective}_{model_name}",
-                                            direction=self.optimisation_direction,
-                                            sampler=study_sampler,
-                                            pruner=self.pruner,
-                                            storage = dir_study_db_url,
-                                            load_if_exists = self.reload_study)
+                    # -- create study or reload previous
+                    study = optuna.create_study(study_name=f"{self._ml_objective}_{model_name}",
+                                                direction=self.optimisation_direction,
+                                                sampler=study_sampler,
+                                                pruner=self.pruner,
+                                                storage = dir_study_db_url,
+                                                load_if_exists = self.reload_study)
 
-                # -- prevent running more trials than cap
-                if (self.reload_study) & (self.reload_trial_cap):
-                    n_trials = self.n_trial - len(study.trials)
-                    if n_trials <= 0:
-                        continue
-                else:
-                    n_trials = self.n_trial
+                    # -- prevent running more trials than cap
+                    if (self.reload_study) & (self.reload_trial_cap):
+                        n_trials = self.n_trial - len(study.trials)
+                        if n_trials <= 0:
+                            continue
+                    else:
+                        n_trials = self.n_trial
 
-                study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                               n_trials=n_trials, 
-                               timeout=self.timeout_study, 
-                               catch=catch, 
-                               n_jobs=self.n_jobs, 
-                               show_progress_bar=self.show_progress_bar)
+                    trial_errors = []
+                    study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler, trial_errors),
+                                   n_trials=n_trials,
+                                   timeout=self.timeout_study,
+                                   catch=(Exception,),
+                                   n_jobs=self.n_jobs,
+                                   show_progress_bar=self.show_progress_bar)
+
+                    if trial_errors:
+                        warnings.warn(f"{len(trial_errors)} of the trials of '{model_name}' failed, the last with: "
+                                      f"{trial_errors[-1]!r}", OptimisationFailureWarning)
+
+                except Exception as e:
+                    warnings.warn(f"Optimisation of '{model_name}' failed, continuing with the remaining models: {e!r}",
+                                  OptimisationFailureWarning)
 
             return
 
 
-        def _create_objective(study, create_params, model, model_name, dir_sampler):
+        def _create_objective(study, create_params, model, model_name, dir_sampler, trial_errors):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
             the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
@@ -512,7 +610,6 @@ class AutomatedML:
 
                 # -- add early stopping for models that support it
                 early_stopping_models = model_name in models_with_early_stopping
-                needs_multi_outpu_wrapper = model_name in models_without_native_multioutput
 
                 valid_early_stop_input = (isinstance(self.boosted_early_stopping_rounds, int)) & (self.boosted_early_stopping_rounds != 0)
                 self._early_stopping_permitted = early_stopping_models & valid_early_stop_input
@@ -520,28 +617,22 @@ class AutomatedML:
                 if self._early_stopping_permitted:
                     model_with_parameters=model_with_parameters.set_params(early_stopping_rounds=self.boosted_early_stopping_rounds)
 
-                if self._ml_objective == 'regression' and self._is_multioutput and needs_multi_outpu_wrapper:
-                    model_with_parameters = MultiOutputRegressor(model_with_parameters)
+                # -- set training objective and early stopping metric derived from the loss
+                model_with_parameters, fit_params = self._loss.configure_estimator(
+                    model_with_parameters, model_name, early_stopping=self._early_stopping_permitted)
 
                 # -- ordinal and nominal encoding
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
 
-                # -- allow for transformed regressor (single-output only)
-                # if self._ml_objective == 'regression' and not self._is_multioutput:
-                if self._ml_objective == 'regression':
-                    # -- Instantiate transformer for dependents (single output)
+                # -- Instantiate transformer for dependents (regression only, not used with custom objectives)
+                transformer = None
+                if self._ml_objective == 'regression' and not self._loss.uses_custom_objective(model_name):
                     transformer = TransformerChooser(random_state=self.random_state, trial=trial, **self.transformer_kwargs).suggest_and_fit()
 
-                    model_final = TransformedTargetRegressor(
-                        regressor=model_with_parameters,
-                        transformer=transformer
-                    )
-
-                elif self._ml_objective == 'classification':
-                    model_final = model_with_parameters
+                model_final = self._build_model(model_name, model_with_parameters, transformer)
 
                 # -- Make a pipeline
-                pipeline = Pipeline([
+                pipeline = LossAwarePipeline([
                     ('categorical', categorical),
                     ('poly', poly),
                     ('spline', spline),
@@ -551,7 +642,9 @@ class AutomatedML:
                     ('model', model_final)
                     ])
 
-                performance = _model_performance(trial, model_name, pipeline)
+                # -- fit parameters are passed to the model step of the pipeline
+                fit_params = {f'model__{key}': value for key, value in fit_params.items()}
+                performance = _model_performance(trial, model_name, pipeline, fit_params)
 
                 # -- re-save the sampler after calculating each performance
                 with open(dir_sampler, "wb") as sampler_state:
@@ -566,9 +659,26 @@ class AutomatedML:
             else:
                 wrapped_objective=_objective
 
-            return wrapped_objective
+            # -- specific hyperparameters can fail, which only ends the trial. It is reported as pruned, since the
+            # TPE sampler ignores failed trials and would keep returning to the settings that fail
+            def _objective_recording_errors(trial):
+                try:
+                    value = wrapped_objective(trial)
+                    if np.isfinite(value):
+                        return value
+                    error = ValueError(f"score of the trial is {value}")
+                except optuna.TrialPruned:
+                    raise
+                except Exception as e:
+                    error = e
 
-        def _model_performance(trial, model_name, pipeline) -> float:
+                trial_errors.append(error)
+                trial.set_user_attr('failure', repr(error))
+                raise optuna.TrialPruned() from error
+
+            return _objective_recording_errors
+
+        def _model_performance(trial, model_name, pipeline, fit_params) -> float:
             """
             Evaluates the performance of the `pipeline` model. The performance is evaluated by splitting the data into
             K-folds and iteratively training and assessing the model using an increasing fraction of the training and
@@ -576,7 +686,7 @@ class AutomatedML:
             """
 
             # -- retrieve list containing with dataframes for training and testing for each fold
-            indexes_train_kfold = list(self.cross_validation.split(self.X_train))
+            indexes_train_kfold = self._cv_splits(self.X_train, self.y_train)
 
             # -- the first trial does not require pruning, go straight to last fit fraction
             fractions = [self.fit_frac[-1]] if trial.number == 0 else self.fit_frac
@@ -588,9 +698,10 @@ class AutomatedML:
             # -- performance is assessed per fraction so that pruning may early on remove unpromising trials
             for idx_fraction, partial_fit_frac in enumerate(fractions):
 
-                # -- when too few samples are available for assessment proceed to next fraction
-                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / self.cross_validation.n_splits))
-                if min_samples < 20:
+                # -- when too few samples are available for assessment proceed to next fraction,
+                # the last fraction is always assessed as it determines the performance of the trial
+                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / len(indexes_train_kfold)))
+                if (min_samples < 20) & (idx_fraction < len(fractions) - 1):
                     continue
 
                 # -- prepare storage lists
@@ -605,17 +716,15 @@ class AutomatedML:
                     fold_y_train = self.y_train.iloc[fold[0]]
                     fold_y_test = self.y_train.iloc[fold[1]]
 
-                    # -- retrieve indexes belonging to fraction of the fold
-                    idx_partial_fit_train = fold_X_train.sample(frac=partial_fit_frac,
-                                                                              random_state=self.random_state).index
-                    idx_partial_fit_test = fold_X_test.sample(frac=partial_fit_frac,
-                                                                            random_state=self.random_state).index
+                    # -- retrieve positions belonging to fraction of the fold (entire groups if grouping applies)
+                    idx_partial_fit_train = self._sample_fraction(fold_X_train, partial_fit_frac)
+                    idx_partial_fit_test = self._sample_fraction(fold_X_test, partial_fit_frac)
 
                     # -- select fraction of fold
-                    fold_X_train_frac = fold_X_train.loc[idx_partial_fit_train]
-                    fold_X_test_frac = fold_X_test.loc[idx_partial_fit_test]
-                    fold_y_train_frac = fold_y_train.loc[idx_partial_fit_train]
-                    fold_y_test_frac = fold_y_test.loc[idx_partial_fit_test]
+                    fold_X_train_frac = fold_X_train.iloc[idx_partial_fit_train]
+                    fold_X_test_frac = fold_X_test.iloc[idx_partial_fit_test]
+                    fold_y_train_frac = fold_y_train.iloc[idx_partial_fit_train]
+                    fold_y_test_frac = fold_y_test.iloc[idx_partial_fit_test]
 
                     # -- determine if model is  boosted model
                     if  self._early_stopping_permitted: 
@@ -629,40 +738,26 @@ class AutomatedML:
                         # the model with early stopping, is therefore applied on an already transformed
                         # X-matrix.
 
-                        # -- fit transformations in pipeline (all but the last step) for later use
-                        pipeline[:-1].fit_transform(fold_X_train_frac)
-
-                        # -- transform testing fold of training data
-                        fold_X_test_frac_transformed = pipeline[:-1].transform(fold_X_test_frac)
+                        # -- The LossAwarePipeline handles this: the evaluation set is transformed by the
+                        # fitted pipeline steps and evaluated with the loss (the evaluation metric of the model)
 
                         # -- fit to data while giving evaluation dataset
                         pipeline.fit(fold_X_train_frac, fold_y_train_frac,
-                                    model__eval_set=[(fold_X_test_frac_transformed, fold_y_test_frac)],
-                                    )
+                                     eval_set=(fold_X_test_frac, fold_y_test_frac), **fit_params)
 
                     else:
                         # -- fit training data
-                        pipeline.fit(fold_X_train_frac, fold_y_train_frac)
+                        pipeline.fit(fold_X_train_frac, fold_y_train_frac, **fit_params)
 
                     # -- assess fold performance
                     # -- in 'try' function as really poor performance can error out
                     try:
                         # -- make fold prediction on original test fraction of training dataset
-                        prediction = pipeline.predict(fold_X_test_frac)
-                        
-                        # -- average predictions and true values over 'safe'/'group' multi-index
-                        if isinstance(self.group_by_index_columns, list):
-                            
-                            fold_y_test_frac_eval = fold_y_test_frac.groupby(level=self.group_by_index_columns).aggregate(self.agg_func)
-                            prediction_eval = pd.DataFrame(prediction, index=fold_y_test_frac.index).groupby(level=self.group_by_index_columns).aggregate(self.agg_func)
-                            pass
-                        else:
-                            fold_y_test_frac_eval = fold_y_test_frac
-                            prediction_eval = prediction
-                            pass
+                        prediction = self._loss.predict(pipeline, fold_X_test_frac)
 
-                        # -- assess prediction with chosen metric (handles both single and multi-output)
-                        result_fold = self.metric_optimise(fold_y_test_frac_eval, prediction_eval)
+                        # -- assess prediction with the loss (aggregated per group if grouping applies,
+                        # handles both single and multi-output)
+                        result_fold = self._loss.score(fold_y_test_frac, prediction)
 
                     except Exception as e:
                         result_fold = np.nan
@@ -743,23 +838,24 @@ class AutomatedML:
             df_trials = study.trials_dataframe()
 
             # -- remove trials returning NaN's or undesired_sign
+            if df_trials.empty:
+                print(f"No trials for {model_name} — skipping.", flush=True)
+                continue
             df_trials_complete = df_trials[df_trials.state == 'COMPLETE']
             if df_trials_complete.empty:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
                 continue
 
-            df_trials_non_pruned = df_trials_complete[np.isfinite(df_trials.value)]
+            df_trials_non_pruned = df_trials_complete[np.isfinite(df_trials_complete.value)]
             
             if df_trials_non_pruned.empty:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
                 continue
             
-            # -- select parameters corresponding to model
-            list_params = list(study.best_params)
+            # -- parameters of the trials not belonging to the model, `criterion` is left in studies of earlier versions
+            # but is removed from gradient boosting in scikit-learn 1.11
             list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
-                                         'transformers', 'n_quantiles', 'output_distribution']
-            list_params_model = set(list_params).difference(set(list_params_not_model))
-
+                                         'transformers', 'n_quantiles', 'output_distribution', 'criterion']
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
@@ -794,7 +890,7 @@ class AutomatedML:
             for i, idx_model in enumerate(idx_models):
 
                 model_params = study.trials[idx_model].params
-                parameter_dict = {k: model_params[k] for k in model_params.keys() & set(list_params_model)}
+                parameter_dict = {k: v for k, v in model_params.items() if k not in list_params_not_model}
 
                 # -- select all the pipeline steps corresponding to input settings or best trial
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
@@ -805,25 +901,14 @@ class AutomatedML:
 
                 model_with_parameters = self._models_assess[model_name][0](**parameter_dict)
 
-                # -- Create transformed regressor (single-output only)
-                if self._ml_objective == 'regression':
+                # -- set training objective derived from the loss
+                model_with_parameters, _ = self._loss.configure_estimator(model_with_parameters, model_name)
 
-                    needs_multi_outpu_wrapper = model_name in models_without_native_multioutput
-                    if needs_multi_outpu_wrapper and self._is_multioutput:
-                        model_with_parameters = MultiOutputRegressor(model_with_parameters)
-                    
-                    transformer = TransformerChooser(model_params.get('n_quantiles'), model_params.get('output_distribution'), self.random_state).fit()
+                # -- Create transformed regressor (regression), or normal classification model
+                transformer = TransformerChooser(model_params.get('n_quantiles'), model_params.get('output_distribution'), random_state=self.random_state).fit()
+                model_final = self._build_model(model_name, model_with_parameters, transformer)
 
-                    model_final = TransformedTargetRegressor(
-                        regressor = model_with_parameters,
-                        transformer = transformer
-                    )
-
-                # -- ... or normal classification model
-                elif self._ml_objective == 'classification':
-                    model_final = model_with_parameters
-
-                pipe_single_study = Pipeline([
+                pipe_single_study = LossAwarePipeline([
                     ('categorical', categorical),
                     ('poly', poly),
                     ('spline', spline),
@@ -846,7 +931,9 @@ class AutomatedML:
         This method will evaluate the model performance of the estimators specified in 'models_to_assess' by
         splitting the test data into folds according to the cross-validation specified, training the estimators on the
         training data and evaluating the predictions on the test data. The performance will be stored in a dictionary
-        per metric per estimator. If the estimator is the stacked model, it will be saved to disk.
+        per metric per estimator, with per metric [mean, std] over the folds. The metrics are those of `metric_assess`
+        followed by `metric_optimise` (the loss). When grouping applies, all metrics are calculated on group
+        aggregates. If the estimator is the stacked model, it will be saved to disk.
 
         Returns
         -------
@@ -856,8 +943,14 @@ class AutomatedML:
         # -- check whether split_train_test method has been performed, else perform it
         if getattr(self, 'X_train') is None: self.split_train_test()
 
+        # -- failures during optimisation do not stop the run, but can leave no models to evaluate
+        if not self.estimators:
+            warnings.warn("No models available to evaluate, all models failed or none were selected. "
+                          "`summary` and `y_pred` are not updated.", OptimisationFailureWarning)
+            return
+
         # -- split data according to cross validation for assessment
-        indexes_test_cv = list(self.cross_validation.split(self.X_test))
+        indexes_test_cv = self._cv_splits(self.X_test, self.y_test)
 
         # -- determine names of models to assess
         models_to_assess = self.list_all_models_assess + ['stacked']
@@ -872,30 +965,44 @@ class AutomatedML:
             if i == len(self.estimators):
                 estimator_temp = self.estimators
 
-                # -- create a scorer compatible with Cross Validated Ridge
-                greater_is_better = self.optimisation_direction == 'maximize'
-                scoring = make_scorer(
-                    self.metric_optimise, 
-                    greater_is_better = greater_is_better
-                    )
+                # -- meta-learner directly optimising the loss
+                if self.stacking_meta_learner == 'loss':
+                    _model_stacking = LossStackingRegressor if self._ml_objective == 'regression' else LossStackingClassifier
+                    self._model_final = _model_stacking(
+                        estimators=estimator_temp,
+                        loss=self._loss,
+                        cv=self.cross_validation
+                        )
 
-                # -- fit stacked model while catching warnings
-                if self._ml_objective == 'regression':
-                    _model_stacking = StackingRegressor
-                    final_estimator = RidgeCV(scoring=scoring)
+                # -- or Ridge meta-learner for which the loss only selects the regularisation strength
+                else:
+                    # -- create a scorer compatible with Cross Validated Ridge
+                    needs_proba = (self._ml_objective == 'classification') & self.metric_optimise.needs_proba
+                    scoring = make_scorer(
+                        self.metric_optimise.metric,
+                        response_method = 'predict_proba' if needs_proba else 'predict',
+                        greater_is_better = self._loss.greater_is_better
+                        )
 
-                    if self._is_multioutput:
-                        _model_stacking = MultiOutputStackingRegressor
+                    if self._ml_objective == 'regression':
+                        _model_stacking = StackingRegressor
+                        final_estimator = RidgeCV(scoring=scoring)
 
-                elif self._ml_objective == 'classification':
-                    _model_stacking = StackingClassifier
-                    final_estimator=RidgeClassifierCV(scoring=scoring)
+                        if self._is_multioutput:
+                            _model_stacking = MultiOutputStackingRegressor
 
-                self._model_final = _model_stacking(
-                    estimators=estimator_temp,
-                    final_estimator=final_estimator,
-                    cv=self.cross_validation
-                    )
+                    elif self._ml_objective == 'classification':
+                        _model_stacking = StackingClassifier
+
+                        # -- ridge classifiers do not provide the probabilities required by the loss
+                        final_estimator = LogisticRegressionCV(scoring=scoring) if needs_proba else RidgeClassifierCV(scoring=scoring)
+
+                    # -- splits are precomputed such that groups are kept together
+                    self._model_final = _model_stacking(
+                        estimators=estimator_temp,
+                        final_estimator=final_estimator,
+                        cv=self._cv_splits(self.X_train, self.y_train)
+                        )
 
                 FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],
                                                     self.warning_verbosity)
@@ -929,25 +1036,37 @@ class AutomatedML:
                                                     self.warning_verbosity)
 
             # -- create dictionary with elements per metric allowing per metric fold performance to be stored
+            # -- the loss (metric_optimise) is always assessed, as last metric
             metric_performance_dict = dict(
                 [('metric_' + str(i), [metric, list()]) for i, metric in enumerate(self.metric_assess)])
+            metric_performance_dict['metric_optimise'] = [self._loss.loss.metric, list()]
 
             # -- For each TEST data fold...
             for idx_fold, fold in enumerate(indexes_test_cv):
                 # -- Select the fold indexes
                 fold_test = fold[1]
+                fold_X_test = self.X_test.iloc[fold_test, :]
+                fold_y_test = self.y_test.iloc[fold_test]
 
                 # -- Predict on the TEST data fold
-                prediction = self._model_final.predict(self.X_test.iloc[fold_test, :])
+                prediction = self._model_final.predict(fold_X_test)
 
                 # -- Handle multi-output: ensure prediction is DataFrame for consistency
                 if self._is_multioutput and isinstance(prediction, np.ndarray):
-                    prediction = pd.DataFrame(prediction, columns=self.y_test.columns, index=self.X_test.iloc[fold_test].index)
+                    prediction = pd.DataFrame(prediction, columns=self.y_test.columns, index=fold_X_test.index)
 
-                # -- Assess prediction per metric and store per-fold performance in dictionary
-                [metric_performance_dict[key][1].append(
-                    metric_performance_dict[key][0](self.y_test.iloc[fold_test], prediction))
-                 for key in metric_performance_dict]
+                # -- Assess prediction per metric (on group aggregates if grouping applies) and store per-fold
+                # performance in dictionary
+                for key, (metric, performance) in metric_performance_dict.items():
+                    try:
+                        if key == 'metric_optimise':
+                            performance.append(self._loss.score(fold_y_test, self._loss.predict(self._model_final, fold_X_test)))
+                        else:
+                            performance.append(metric(*self._loss.aggregate(fold_y_test, prediction)))
+                    except Exception as e:
+                        performance.append(np.nan)
+                        if self.warning_verbosity != 'ignore':
+                            warnings.warn(f"Error assessing {model} with {key}: {e}", UserWarning)
 
             # -- store mean and standard deviation of performance over folds per model
             summary[model] = [
@@ -992,9 +1111,9 @@ class AutomatedML:
         Parameters
         ----------
         n_train_points: int, default=200
-            number of training observations (or clusters) for to use in explaining the model
+            number of training observations (or clusters) for to use in explaining the model, at most those available
         n_test_points: int, default=200
-            number of test observations for which to assess feature importance
+            number of test observations for which to assess feature importance, at most those available
         cluster: bool, default=True
             whether to cluster the training data. If not individual points are chosen to create explainer 
             
@@ -1019,6 +1138,9 @@ class AutomatedML:
                 
             except:
                 raise Exception(f"No trained model available in write_folder: {self.write_folder}")
+
+        n_train_points = min(n_train_points, len(self.X_train))
+        n_test_points = min(n_test_points, len(self.X_test))
 
         # -- cluster the training data to speed up, otherwise randomly sample training data
         if cluster:

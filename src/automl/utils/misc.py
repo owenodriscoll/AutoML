@@ -8,7 +8,7 @@ import numpy as np
 
 def assert_not_lambda(func):
     assert callable(func), f"{func!r} is not callable"
-    assert func.__name__ != "<lambda>", (
+    assert getattr(func, "__name__", None) != "<lambda>", (
         f"Lambda functions are not allowed: {func!r}. "
         "Use a named function defined with 'def'."
     )
@@ -84,14 +84,16 @@ def envelope(df, param_x, param_y, begin, end, steps =25, log = True):
     placeholder['bins_y'], bins = pd.cut(abs(placeholder[param_y]), bins=bins, include_lowest=True, retbins=True)
         
     bin_center = (bins[:-1] + bins[1:]) /2
-    bin_median = abs(placeholder.groupby('bins_x')[param_y].agg(np.nanmedian))#.nanmedian())
-    bin_count_x = abs(placeholder.groupby('bins_x')[param_x].count())
-    bin_count_y = abs(placeholder.groupby('bins_y')[param_y].count())
-    bin_std = abs(placeholder.groupby('bins_x')[param_y].agg(np.nanstd)) #.nanstd())
-    bin_quantile_a = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 2.5)))
-    bin_quantile_b = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 16)))
-    bin_quantile_c = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 84)))
-    bin_quantile_d = abs(placeholder.groupby('bins_x')[param_y].agg(lambda x: np.nanpercentile(x, q = 97.5)))
+    # -- observed=False keeps empty bins, such that all statistics align with bin_center
+    grouped_x = placeholder.groupby('bins_x', observed=False)
+    bin_median = abs(grouped_x[param_y].agg(np.nanmedian))#.nanmedian())
+    bin_count_x = abs(grouped_x[param_x].count())
+    bin_count_y = abs(placeholder.groupby('bins_y', observed=False)[param_y].count())
+    bin_std = abs(grouped_x[param_y].agg(np.nanstd)) #.nanstd())
+    bin_quantile_a = abs(grouped_x[param_y].agg(lambda x: np.nanpercentile(x, q = 2.5)))
+    bin_quantile_b = abs(grouped_x[param_y].agg(lambda x: np.nanpercentile(x, q = 16)))
+    bin_quantile_c = abs(grouped_x[param_y].agg(lambda x: np.nanpercentile(x, q = 84)))
+    bin_quantile_d = abs(grouped_x[param_y].agg(lambda x: np.nanpercentile(x, q = 97.5)))
     return bin_center, bin_median, bin_count_x, bin_count_y, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d
 
 def plot_envelope_single(df_plot, param_test, param_predict, hist_steps, title, x_axis_title, y_axis_title, alpha = 1, legend = True, axis_scale = 'log', ax_min = 0.5, ax_max = 10000 ):
@@ -102,7 +104,7 @@ def plot_envelope_single(df_plot, param_test, param_predict, hist_steps, title, 
     ax2 = axes
     ax2_2 = ax2.twinx()
     bin_center, bin_median, bin_count_test, bin_count_pred, bin_std, bin_quantile_a, bin_quantile_b, bin_quantile_c, bin_quantile_d = envelope(df_plot, param_test, param_predict, \
-                                                                                                                             -1, 4, steps =hist_steps, log = axis_scale == True)
+                                                                                                                             -1, 4, steps =hist_steps, log = axis_scale == 'log')
     ax2.plot(bin_center, bin_median, 'k', label = r'Median')
     ax2.fill_between(bin_center, bin_quantile_b, bin_quantile_c, color = 'gray', alpha = 0.8, label = r'$68\%%$')
     ax2.fill_between(bin_center, bin_quantile_a, bin_quantile_d, color = 'gray', alpha = 0.6, label = r'$95\%%$')

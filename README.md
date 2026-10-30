@@ -14,6 +14,8 @@ automl contains several additional functionalities beyond the hyperoptimization 
 * polynomial expansion
 * categorical feature support (nominal and ordinal)
 * bagging of weak models in addition to optimized models
+* custom loss functions, carried through optimization, early stopping, training, stacking and evaluation
+* group-level losses for multi-index data (e.g. targets only valid on a coarser scale than the observations)
 * multithreading
 * feature-importance analyses with `shap`
 
@@ -111,4 +113,89 @@ regression = AutomatedRegression(
 regression.apply()
 regression.summary
     
+```
+
+Failures during optimization do not stop the run: a failing trial or model is skipped and reported with an `OptimisationFailureWarning`, at any `warning_verbosity`. Failing trials are stored as pruned, with the reason in their `failure` user attribute, so that the sampler moves away from those settings. If no model remains, `summary` stays empty.
+
+## Testing
+
+Install the test dependencies and run the suite from the root of the repository:
+```
+python3 -m pip install -e ".[test]"
+pytest                  # everything, a few minutes
+pytest -m "not slow"    # quick subset, excludes exhaustive tests of all models and settings
+pytest --cov            # with coverage, fails below the threshold in pyproject.toml
+pytest -rx              # lists the known bugs
+```
+
+GitHub Actions runs on every pull request, on pushes to `main` and `dev`, and weekly, as dependencies are not pinned and new releases can break the package without any change here. Each run, on Python 3.11 and 3.12:
+
+1. builds the package, installs it in a clean environment without test dependencies, checks for dependency conflicts and runs it (`.github/smoke_test.py`)
+2. runs the test suite with coverage
+
+The `CI passed` check combines these results, and is the one to require in the branch rules of the repository.
+
+An `OptimisationFailureWarning` fails a test unless the test expects it with `pytest.warns`. A failing trial only warns, so a test would otherwise pass on a broken model.
+
+Known bugs are recorded as `@pytest.mark.xfail(reason="BUG: ...")` tests describing the correct behaviour. These are strict: after fixing a bug its test fails as `XPASS(strict)` until the marker is removed.
+
+## Custom losses
+
+The loss passed as `metric_optimise` is used in every stage of the learning:
+
+| Stage | How the loss is used |
+|---|---|
+| Hyperparameter optimization | Scores the cross-validation folds |
+| Early stopping (`lightgbm`, `xgboost`, `catboost`) | Evaluation metric on the validation fold |
+| Training of boosted regression models | Training objective, from its gradient and hessian |
+| Stacking (`stacking_meta_learner='loss'`) | Non-negative weights of the models are chosen to optimise the loss |
+| Evaluation | Always reported, as last metric in `summary` |
+
+A plain metric `(y_true, y_pred) -> float` suffices for all stages but training. For training, the boosted models need the gradient and hessian of the loss. These are known for common metrics (e.g. `r2_score` and `mean_squared_error` train on squared error, `mean_absolute_error` on absolute error). For other metrics, supply them with `CustomLoss`; otherwise the models train on their default objective and a `LossFallbackWarning` is issued.
+
+```python
+import numpy as np
+from automl import AutomatedRegression, CustomLoss
+
+def ratio_error(y_true, y_pred):
+    """Squared error of the ratio of two targets"""
+    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
+    return np.mean((y_true[:, 0] / y_true[:, 1] - y_pred[:, 0] / y_pred[:, 1]) ** 2)
+
+def ratio_error_grad_hess(y_true, y_pred):
+    """Gradient and diagonal hessian w.r.t. y_pred, of the summed loss (LightGBM/XGBoost convention)"""
+    r_true, r_pred = y_true[:, 0] / y_true[:, 1], y_pred[:, 0] / y_pred[:, 1]
+    d_ratio = np.c_[1 / y_pred[:, 1], -y_pred[:, 0] / y_pred[:, 1] ** 2]
+    return 2 * (r_pred - r_true)[:, None] * d_ratio, 2 * d_ratio ** 2
+
+regression = AutomatedRegression(
+    y=df_y,  # two target columns
+    X=df_X,
+    metric_optimise=CustomLoss(ratio_error, grad_hess=ratio_error_grad_hess),
+    optimisation_direction='minimize',
+    models_to_optimize=['xgboost', 'bayesianridge'],
+    )
+```
+
+For classification, set `CustomLoss(metric, needs_proba=True)` for metrics requiring class probabilities (e.g. `log_loss`). Classifiers always train on their default objective.
+
+Limitations:
+* only `lightgbm`, `xgboost` and `catboost` train on custom objectives; other models still use the loss for optimization and stacking
+* for multi-output, only `xgboost` (fitted on all targets jointly) trains on a loss combining targets; models wrapped per target fall back
+* `catboost` evaluates custom objectives on chunks of rows, so its `grad_hess` must be element-wise and group-level objectives fall back
+
+### Group-level losses
+
+With `group_by_index_columns`, targets and predictions are aggregated per group (with `agg_func`) before the loss is calculated, in all stages above. The models are thereby constrained to fit the target on the scale of the groups, while deviations within groups are only constrained by regularisation. Training on group-level gradients requires `agg_func` to be `'mean'`/`np.nanmean` or `'sum'`. The train-test split and the cross-validation (`GroupKFold` by default) keep groups together, preventing leakage between training and validation data.
+
+```python
+regression = AutomatedRegression(
+    y=df_y,  # multi-index ['safe', 'group', 'index']
+    X=df_X,
+    metric_optimise=r2_score,
+    optimisation_direction='maximize',
+    group_by_index_columns=['safe'],
+    agg_func='mean',
+    models_to_optimize=['lightgbm', 'xgboost', 'bayesianridge'],
+    )
 ```

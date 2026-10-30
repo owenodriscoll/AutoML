@@ -32,7 +32,7 @@ class AutomatedClassification(AutomatedML):
         super().__post_init__()
         
         if self.metric_assess is None:
-            precision_score_macro = [lambda y_true, y_pred: precision_score(y_true, y_pred, average = 'macro')]
+            precision_score_macro = lambda y_true, y_pred: precision_score(y_true, y_pred, average = 'macro')
             self.metric_assess: List[Callable] = [accuracy_score, precision_score_macro]
 
         if self.models_to_optimize is None: 
@@ -42,9 +42,11 @@ class AutomatedClassification(AutomatedML):
             self.models_to_assess: List[str] = self.models_to_optimize
             
         # -- number of classes is a necessary initialization param for several classifiers
-        n_classes = len(set(self.y_train)) + 1
+        n_classes = self.y_train.iloc[:, 0].nunique()
         self._models_optimize: List[Callable] = classifier_selector(classifier_names=self.models_to_optimize,
                                                         random_state=self.random_state,  n_classes = n_classes)
         self._models_assess: List[Callable] = classifier_selector(classifier_names=self.models_to_assess,
                                                       random_state=self.random_state,  n_classes = n_classes)
+
+        self._resolve_training_objectives()
         

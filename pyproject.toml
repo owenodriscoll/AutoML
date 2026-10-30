@@ -21,7 +21,9 @@ dependencies = [
   "optuna",
   "scikit-learn",
   "numpy",
-  
+  "scipy",
+  "matplotlib",
+
   # this pandas version is needed to prevent errors in grouping by index
   "pandas>=3.0.0",
   "SQLAlchemy",
@@ -32,6 +34,8 @@ dependencies = [
   # these are needed for watermarking package versions
   "tomli",
   "watermark",
+  "ipython",
+  "packaging",
 
   # for pickling custom scorers
   "cloudpickle",
@@ -40,6 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
   shap = ["shap"]
+  test = ["pytest", "pytest-cov", "pytest-timeout", "shap"]
 
 [project.urls]
 Homepage = "https://github.com/owenodriscoll/AutoML"
@@ -47,3 +52,21 @@ Homepage = "https://github.com/owenodriscoll/AutoML"
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+# -- known bugs are strict xfails: once fixed the test fails until its marker is removed
+xfail_strict = true
+markers = ["slow: exhaustive tests over all models and settings, excluded with -m 'not slow'"]
+# -- thread method, as the signal method would conflict with the SIGALRM of `timeout_trial`
+timeout = 300
+timeout_method = "thread"
+
+[tool.coverage.run]
+source = ["automl"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

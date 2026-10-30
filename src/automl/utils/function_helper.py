@@ -1,6 +1,13 @@
 import functools, warnings, sys, os
 
 
+class OptimisationFailureWarning(RuntimeWarning):
+    """
+    Issued when a trial or model fails during hyperparameter optimisation, which continues with what remains.
+    Not a UserWarning, so that failures are visible regardless of `warning_verbosity`.
+    """
+
+
 class FuncHelper:
     @staticmethod
     def run_with_argument(f, args):
@@ -20,25 +27,23 @@ class FuncHelper:
     def function_warning_catcher(f, args, new_warning_verbosity, old_warning_verbosity = 'default', new_std_error = None):
         warnings.simplefilter(new_warning_verbosity, UserWarning)
         old_stdout = sys.stdout
-        if new_warning_verbosity == 'ignore':
-            sys.stdout = open(os.devnull, "w")
+        devnull = open(os.devnull, "w") if new_warning_verbosity == 'ignore' else None
+        if devnull is not None:
+            sys.stdout = devnull
         else:
             sys.stdout = old_stdout if new_std_error is None else new_std_error
 
-        # -- add in try loop such that warnings are reset to original even
-        # if errors occur in function
+        # -- add in try loop such that warnings and stdout are reset to original
+        # even if the function is interrupted or errors occur in function
         try:
-            out = FuncHelper.run_with_argument(f, args)
+            return FuncHelper.run_with_argument(f, args)
         except Exception as e:
-            warnings.simplefilter('default', UserWarning)
-            sys.stdout = old_stdout
-            # raise Exception("Error in function warning catcher")
             raise RuntimeError("Error in function warning catcher") from e
-
-        warnings.simplefilter(old_warning_verbosity, UserWarning)
-        sys.stdout = old_stdout
-
-        return out
+        finally:
+            warnings.simplefilter(old_warning_verbosity, UserWarning)
+            sys.stdout = old_stdout
+            if devnull is not None:
+                devnull.close()
 
     @staticmethod
     def method_warning_catcher(warning_verbosity=None):
@@ -61,7 +66,7 @@ class FuncHelper:
                     except Exception as e:
                         warnings.warn(
                             str(e),
-                            UserWarning,
+                            OptimisationFailureWarning,
                             stacklevel=2
                         )
                         return None
