@@ -18,7 +18,7 @@ from sklearn.model_selection import GroupKFold, GroupShuffleSplit, KFold, LeaveO
     StratifiedGroupKFold, StratifiedKFold, TimeSeriesSplit
 from sklearn.preprocessing import PolynomialFeatures, QuantileTransformer
 
-from automl import AutomatedClassification, AutomatedRegression, CustomLoss, LossFallbackWarning
+from automl import AutomatedClassification, AutomatedRegression, CustomLoss, LossFallbackWarning, OptimisationFailureWarning
 from automl.loss import TargetCenterer, squared_error_grad_hess
 from automl.multi_output import MultiOutputStackingRegressor
 from automl.stacking import LossStackingClassifier, LossStackingRegressor
@@ -163,37 +163,66 @@ class Crashing(RegressorMixin, BaseEstimator):
         return np.zeros(len(X))
 
 
-def test_failure_during_optimisation_is_reported_when_warnings_are_enabled(regression_data, automl_kwargs):
+@pytest.mark.parametrize('verbosity', ['ignore', 'always', 'error'])
+def test_failure_during_optimisation_warns_at_any_verbosity(regression_data, automl_kwargs, verbosity):
     X, y = regression_data
-    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], warning_verbosity='always'))
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], warning_verbosity=verbosity))
     regression._models_optimize = {'crashing': (Crashing, lambda trial: {})}
-    with pytest.warns(UserWarning, match='crashed during fit'):
+    with pytest.warns(OptimisationFailureWarning, match="2 of the trials of 'crashing' failed.*crashed during fit"):
         regression.model_hyperoptimise()
 
 
-@pytest.mark.xfail(reason="BUG: with the default warning_verbosity='ignore' any exception in model_hyperoptimise is "
-                          "discarded without a trace, the user only sees a later unrelated failure or a missing model")
-def test_failure_during_optimisation_is_visible_by_default(regression_data, automl_kwargs):
-    X, y = regression_data
-    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars']))
-    regression._models_optimize = {'crashing': (Crashing, lambda trial: {})}
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        try:
-            regression.model_hyperoptimise()
-        except ValueError:
-            return
-    assert any('crashed during fit' in str(warning.message) for warning in caught)
-
-
-@pytest.mark.xfail(reason="BUG: a model failing in one trial aborts the study loop, later models are silently not optimised")
 def test_failing_model_does_not_stop_optimisation_of_other_models(regression_data, automl_kwargs):
     X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars']))
+    regression._models_optimize = {'crashing': (Crashing, lambda trial: {}), **regression._models_optimize}
+    regression._models_assess = regression._models_optimize
+
+    with pytest.warns(OptimisationFailureWarning, match='crashed during fit'):
+        regression.apply()
+    assert set(regression.summary) == {'lassolars_best', 'stacked'}
+
+
+def test_failing_trial_does_not_end_the_study(regression_data, automl_kwargs):
+    class FailsOnce(RegressorMixin, BaseEstimator):
+        fits = []
+
+        def fit(self, X, y):
+            self.fits.append(1)
+            if len(self.fits) == 1:
+                raise ValueError('only the first fit fails')
+            return self
+
+        def predict(self, X):
+            return np.zeros(len(X))
+
+    X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], n_trial=3))
+    regression._models_optimize = {'fails_once': (FailsOnce, lambda trial: {})}
+    with pytest.warns(OptimisationFailureWarning, match="1 of the trials"):
+        regression.model_hyperoptimise()
+    assert len(completed_trials(regression, 'fails_once')) == 2
+
+
+def test_failure_to_set_up_a_study_does_not_stop_other_models(regression_data, automl_kwargs):
+    X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars', 'elasticnet']))
-    lassolars = regression._models_optimize['lassolars']
-    regression._models_optimize = {'crashing': (Crashing, lambda trial: {}), 'lassolars': lassolars}
-    regression.model_hyperoptimise()
-    assert os.path.isfile(f"{regression.write_folder}lassolars.db")
+    os.makedirs(f"{regression.write_folder}lassolars.db")  # -- the database cannot be created at this path
+
+    with pytest.warns(OptimisationFailureWarning, match="Optimisation of 'lassolars' failed"):
+        regression.model_hyperoptimise()
+    assert n_trials(regression, 'elasticnet') == 2
+
+
+def test_run_without_any_usable_model_warns_rather_than_raises(regression_data, automl_kwargs):
+    X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars']))
+    regression._models_optimize = regression._models_assess = {'crashing': (Crashing, lambda trial: {})}
+
+    with pytest.warns(OptimisationFailureWarning) as caught:
+        regression.apply()
+    assert any('No models available to evaluate' in str(warning.message) for warning in caught)
+    assert regression.summary is None
 
 
 def test_library_errors_fail_a_trial_rather_than_the_study(regression_data, automl_kwargs):
@@ -216,14 +245,12 @@ def test_library_errors_fail_a_trial_rather_than_the_study(regression_data, auto
     assert [t.state for t in study_of(regression, 'lightgbm').trials] == [optuna.trial.TrialState.FAIL] * 2
 
 
-@pytest.mark.xfail(raises=RuntimeError, reason="BUG: with under 100 training rows (5 folds) every fraction is skipped for "
-                                               "having fewer than 20 samples, the trial raises IndexError on the empty results "
-                                               "and evaluation ends in an opaque 'Error in function warning catcher'")
-def test_small_dataset(regression_data, automl_kwargs):
+def test_small_dataset_assesses_the_last_fraction(regression_data, automl_kwargs):
     X, y = regression_data
-    regression = AutomatedRegression(y=y.iloc[:60], X=X.iloc[:60], **automl_kwargs(models_to_optimize=['lassolars']))
+    regression = AutomatedRegression(y=y.iloc[:60], X=X.iloc[:60], **automl_kwargs(models_to_optimize=['lassolars'], fit_frac=[.5, 1]))
     regression.apply()
     assert 'stacked' in regression.summary
+    assert completed_trials(regression, 'lassolars')[1].intermediate_values == {}  # -- 0.5 of the data is too little
 
 
 # --------------------------------------------------- reloading ---------------------------------------------------
@@ -807,7 +834,7 @@ def test_stratified_group_cross_validation(grouped_data, automl_kwargs):
     assert len(classification._cv_splits(classification.X_train)) == 3
 
 
-@pytest.mark.xfail(raises=RuntimeError, reason="BUG: `n_splits` is read from the attribute, which these splitters lack "
+@pytest.mark.xfail(raises=TypeError, reason="BUG: `n_splits` is read from the attribute, which these splitters lack "
                                                "(get_n_splits() should be used), while they are listed as group-aware")
 @pytest.mark.parametrize('cv', [LeaveOneGroupOut(), LeavePGroupsOut(2)], ids=lambda cv: type(cv).__name__)
 def test_leave_groups_out_cross_validation(grouped_data, automl_kwargs, cv):

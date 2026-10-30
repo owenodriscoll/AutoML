@@ -4,7 +4,7 @@ import warnings
 
 import pytest
 
-from automl.utils.function_helper import FuncHelper
+from automl.utils.function_helper import FuncHelper, OptimisationFailureWarning
 
 
 def add(a, b=10):
@@ -105,6 +105,7 @@ class Worker:
 
     @FuncHelper.method_warning_catcher(warning_verbosity='always')
     def crash_loudly(self):
+        warnings.warn('careful', UserWarning)
         raise ValueError('crashed')
 
 
@@ -124,19 +125,19 @@ def test_method_catcher_respects_instance_verbosity():
         Worker('always').succeed(1)
 
 
-def test_method_catcher_converts_exception_to_warning():
-    with pytest.warns(UserWarning, match='crashed'):
-        assert Worker('always').crash() is None
+@pytest.mark.parametrize('verbosity', ['ignore', 'always', 'error'])
+def test_method_catcher_always_reports_exceptions_as_warnings(verbosity):
+    with pytest.warns(OptimisationFailureWarning, match='crashed'):
+        assert Worker(verbosity).crash() is None
 
 
 def test_method_catcher_explicit_verbosity_overrides_instance():
-    with pytest.warns(UserWarning, match='crashed'):
+    with pytest.warns(OptimisationFailureWarning, match='crashed'):
         assert Worker('ignore').crash_loudly() is None
 
 
-def test_method_catcher_escalates_with_error_verbosity():
-    with pytest.raises(UserWarning, match='crashed'):
-        Worker('error').crash()
+def test_failure_warning_is_not_a_user_warning():
+    assert not issubclass(OptimisationFailureWarning, UserWarning)  # -- would be silenced by warning_verbosity
 
 
 def test_method_catcher_restores_warning_filters():

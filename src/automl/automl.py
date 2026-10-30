@@ -27,7 +27,7 @@ from .estimators import LossAwarePipeline, LossAwareTransformedTargetRegressor, 
 from .stacking import LossStackingRegressor, LossStackingClassifier
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
-from .utils.function_helper import FuncHelper
+from .utils.function_helper import FuncHelper, OptimisationFailureWarning
 from .utils.grouped_train_test_splitter import groupwise_train_test_split
 
 # --------------- TODO LIST ---------------
@@ -165,7 +165,8 @@ class AutomatedML:
     random_state: int
         The random seed to use, default is 42.
     warning_verbosity: str
-        The warning verbosity to use, e.g.'ignore','always', default value is 'ignore'.
+        The warning verbosity to use, e.g.'ignore','always', default value is 'ignore'. Failures during optimisation
+        do not stop the run and are always reported, with an OptimisationFailureWarning.
     show_progress_bar: bool
         Whether to show individual trial results or a progress bar. Defaults to False
     transformer_kwargs: dict, optional (default=None)
@@ -486,75 +487,74 @@ class AutomatedML:
             
             The method uses the `_create_objective` function to create the objective function that is optimized by Optuna.
             The final study iteration is saved using cloudpickle.
-            """
 
-            # -- catch library errors raised for specific hyperparameter combinations (e.g. LightGBM finding no
-            # usable features), such that the trial fails rather than aborting the optimization of all models
-            catch = []
-            if 'catboost' in list(self._models_optimize.keys()):
-                import catboost
-                catch.append(catboost.CatBoostError)
-            if 'lightgbm' in list(self._models_optimize.keys()):
-                import lightgbm
-                catch.append(lightgbm.basic.LightGBMError)
-            if 'xgboost' in list(self._models_optimize.keys()):
-                import xgboost
-                catch.append(xgboost.core.XGBoostError)
-            catch = tuple(catch)
+            Failures do not stop the optimization: a failing trial is recorded as failed and a failing model is
+            skipped, both are reported with an OptimisationFailureWarning.
+            """
 
             for model_name, (model, create_params) in self._models_optimize.items():
 
-                # -- create SQL database to store study results
-                dir_study_db = f"{self.write_folder}{model_name}.db"
-                dir_study_db_url = f"sqlite:///{dir_study_db}"
-                dir_sampler = f"{self.write_folder_sampler}{model_name}_sampler.pkl"
+                try:
+                    # -- create SQL database to store study results
+                    dir_study_db = f"{self.write_folder}{model_name}.db"
+                    dir_study_db_url = f"sqlite:///{dir_study_db}"
+                    dir_sampler = f"{self.write_folder_sampler}{model_name}_sampler.pkl"
 
-                # -- check whether database already exists in which case should ...
-                # ... use previous instance of sampler. Not necessary for pruner (#!!! really?)
-                if os.path.exists(dir_sampler):
-                    study_sampler = pickle.load(open(dir_sampler, "rb"))
+                    # -- check whether database already exists in which case should ...
+                    # ... use previous instance of sampler. Not necessary for pruner (#!!! really?)
+                    if os.path.exists(dir_sampler):
+                        study_sampler = pickle.load(open(dir_sampler, "rb"))
 
-                    # -- skip model if database already exists but reloading not permitted
-                    if not self.reload_study:
-                        message = [f"Study `{self._ml_objective}_{model_name}` already exists but `reload_study == False` -- > " +
-                              "model skipped. \nSet `reload_study = True` to continue on existing study."]
+                        # -- skip model if database already exists but reloading not permitted
+                        if not self.reload_study:
+                            message = [f"Study `{self._ml_objective}_{model_name}` already exists but `reload_study == False` -- > " +
+                                  "model skipped. \nSet `reload_study = True` to continue on existing study."]
 
-                        # -- printed to the regular stdout (sys.__stdout__ is invisible in notebooks),
-                        # flush = True prevents buffering of print statement
-                        print(message[0], flush=True)
-                        continue
+                            # -- printed to the regular stdout (sys.__stdout__ is invisible in notebooks),
+                            # flush = True prevents buffering of print statement
+                            print(message[0], flush=True)
+                            continue
 
-                else:
-                    study_sampler = self.sampler
-                    create_engine(dir_study_db_url)
+                    else:
+                        study_sampler = self.sampler
+                        create_engine(dir_study_db_url)
 
-                # -- create study or reload previous
-                study = optuna.create_study(study_name=f"{self._ml_objective}_{model_name}",
-                                            direction=self.optimisation_direction,
-                                            sampler=study_sampler,
-                                            pruner=self.pruner,
-                                            storage = dir_study_db_url,
-                                            load_if_exists = self.reload_study)
+                    # -- create study or reload previous
+                    study = optuna.create_study(study_name=f"{self._ml_objective}_{model_name}",
+                                                direction=self.optimisation_direction,
+                                                sampler=study_sampler,
+                                                pruner=self.pruner,
+                                                storage = dir_study_db_url,
+                                                load_if_exists = self.reload_study)
 
-                # -- prevent running more trials than cap
-                if (self.reload_study) & (self.reload_trial_cap):
-                    n_trials = self.n_trial - len(study.trials)
-                    if n_trials <= 0:
-                        continue
-                else:
-                    n_trials = self.n_trial
+                    # -- prevent running more trials than cap
+                    if (self.reload_study) & (self.reload_trial_cap):
+                        n_trials = self.n_trial - len(study.trials)
+                        if n_trials <= 0:
+                            continue
+                    else:
+                        n_trials = self.n_trial
 
-                study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler),
-                               n_trials=n_trials, 
-                               timeout=self.timeout_study, 
-                               catch=catch, 
-                               n_jobs=self.n_jobs, 
-                               show_progress_bar=self.show_progress_bar)
+                    trial_errors = []
+                    study.optimize(_create_objective(study, create_params, model, model_name, dir_sampler, trial_errors),
+                                   n_trials=n_trials,
+                                   timeout=self.timeout_study,
+                                   catch=(Exception,),
+                                   n_jobs=self.n_jobs,
+                                   show_progress_bar=self.show_progress_bar)
+
+                    if trial_errors:
+                        warnings.warn(f"{len(trial_errors)} of the trials of '{model_name}' failed, the last with: "
+                                      f"{trial_errors[-1]!r}", OptimisationFailureWarning)
+
+                except Exception as e:
+                    warnings.warn(f"Optimisation of '{model_name}' failed, continuing with the remaining models: {e!r}",
+                                  OptimisationFailureWarning)
 
             return
 
 
-        def _create_objective(study, create_params, model, model_name, dir_sampler):
+        def _create_objective(study, create_params, model, model_name, dir_sampler, trial_errors):
             """
             Method creates the objective function that is optimized by Optuna. The objective function first saves
             the Optuna study and instantiates the scaler for the independent variables. Then, it determines if the
@@ -646,7 +646,17 @@ class AutomatedML:
             else:
                 wrapped_objective=_objective
 
-            return wrapped_objective
+            # -- specific hyperparameters can fail (e.g. LightGBM finding no usable features), which only ends the trial
+            def _objective_recording_errors(trial):
+                try:
+                    return wrapped_objective(trial)
+                except optuna.TrialPruned:
+                    raise
+                except Exception as e:
+                    trial_errors.append(e)
+                    raise
+
+            return _objective_recording_errors
 
         def _model_performance(trial, model_name, pipeline, fit_params) -> float:
             """
@@ -668,9 +678,10 @@ class AutomatedML:
             # -- performance is assessed per fraction so that pruning may early on remove unpromising trials
             for idx_fraction, partial_fit_frac in enumerate(fractions):
 
-                # -- when too few samples are available for assessment proceed to next fraction
+                # -- when too few samples are available for assessment proceed to next fraction,
+                # the last fraction is always assessed as it determines the performance of the trial
                 min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / self.cross_validation.n_splits))
-                if min_samples < 20:
+                if (min_samples < 20) & (idx_fraction < len(fractions) - 1):
                     continue
 
                 # -- prepare storage lists
@@ -913,6 +924,12 @@ class AutomatedML:
         
         # -- check whether split_train_test method has been performed, else perform it
         if getattr(self, 'X_train') is None: self.split_train_test()
+
+        # -- failures during optimisation do not stop the run, but can leave no models to evaluate
+        if not self.estimators:
+            warnings.warn("No models available to evaluate, all models failed or none were selected. "
+                          "`summary` and `y_pred` are not updated.", OptimisationFailureWarning)
+            return
 
         # -- split data according to cross validation for assessment
         indexes_test_cv = self._cv_splits(self.X_test)

@@ -1,6 +1,13 @@
 import functools, warnings, sys, os
 
 
+class OptimisationFailureWarning(RuntimeWarning):
+    """
+    Issued when a trial or model fails during hyperparameter optimisation, which continues with what remains.
+    Not a UserWarning, so that failures are visible regardless of `warning_verbosity`.
+    """
+
+
 class FuncHelper:
     @staticmethod
     def run_with_argument(f, args):
@@ -61,7 +68,7 @@ class FuncHelper:
                     except Exception as e:
                         warnings.warn(
                             str(e),
-                            UserWarning,
+                            OptimisationFailureWarning,
                             stacklevel=2
                         )
                         return None

@@ -21,7 +21,8 @@ def regression(regression_data, automl_kwargs):
 
 
 def test_public_api():
-    for name in ['AutomatedRegression', 'AutomatedClassification', 'CustomLoss', 'LossFallbackWarning', 'watermark_from_pyproject']:
+    for name in ['AutomatedRegression', 'AutomatedClassification', 'CustomLoss', 'LossFallbackWarning', 'OptimisationFailureWarning',
+                 'watermark_from_pyproject']:
         assert hasattr(automl, name)
 
 
