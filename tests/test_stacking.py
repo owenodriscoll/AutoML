@@ -4,7 +4,7 @@ import pytest
 from sklearn.base import clone
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupKFold, KFold
+from sklearn.model_selection import GroupKFold, KFold, ShuffleSplit, TimeSeriesSplit
 
 from automl.loss import CustomLoss
 from automl.multi_output import MultiOutputStackingRegressor
@@ -47,12 +47,22 @@ def test_intercept_corrects_bias(signal_and_noise):
     assert r2_score(y, stacker.predict(X)) > .95
 
 
-@pytest.mark.xfail(reason="BUG: weights and intercept are strongly coupled for models with an offset, on which Powell stalls far "
-                          "from the optimum (r2 0.15, 0.99 is achievable). Results never fall below the best starting guess")
-def test_intercept_corrects_large_bias(signal_and_noise):
+@pytest.mark.parametrize('shift', [30., -1000.])
+def test_intercept_corrects_large_bias(signal_and_noise, shift):
     X, y = signal_and_noise
-    stacker = LossStackingRegressor([('biased', ColumnRegressor((0,), shift=30.))], loss=loss_handler(), cv=CV).fit(X, y)
+    stacker = LossStackingRegressor([('biased', ColumnRegressor((0,), shift=shift))], loss=loss_handler(), cv=CV).fit(X, y)
+    assert stacker.intercept_[0] == pytest.approx(-shift, rel=.02)
     assert r2_score(y, stacker.predict(X)) > .99
+
+
+def test_weights_are_found_for_targets_with_large_offset():
+    rng = np.random.default_rng(0)
+    y = pd.Series(300 + rng.normal(size=300))
+    X = pd.DataFrame({'one': y + rng.normal(size=300), 'two': y + rng.normal(size=300), 'bad': 300 + rng.normal(size=300)})
+    stacker = LossStackingRegressor([('one', ColumnRegressor((0,))), ('two', ColumnRegressor((1,))), ('bad', ColumnRegressor((2,)))],
+                                    loss=loss_handler(mean_squared_error, False), cv=CV).fit(X, y)
+    assert stacker.coef_[:2, 0].min() > stacker.coef_[2, 0]
+    assert mean_squared_error(y, stacker.predict(X)) < mean_squared_error(y, X.one)
 
 
 def test_intercept_can_be_disabled(signal_and_noise):
@@ -139,6 +149,57 @@ def test_regressor_can_be_cloned(signal_and_noise):
     assert clone(stacker).fit(X, y).predict(X).shape == (200,)
 
 
+# ---------------------------------------- splitters without a partition ----------------------------------------
+def test_rows_without_out_of_fold_prediction_are_left_out_of_the_weights(signal_and_noise):
+    """Rows only in training folds, as the first rows of TimeSeriesSplit. Their loss must not be evaluated."""
+    X, y = signal_and_noise
+    n_scored = []
+
+    def recording_mse(y_true, y_pred):
+        n_scored.append(len(y_true))
+        return mean_squared_error(y_true, y_pred)
+
+    stacker = LossStackingRegressor([('good', ColumnRegressor((0,)))], loss=loss_handler(recording_mse, False),
+                                    cv=TimeSeriesSplit(3)).fit(X, y)
+    assert set(n_scored) == {150}
+    assert stacker.coef_[0, 0] == pytest.approx(1., abs=.1)
+
+
+def test_rows_in_several_test_folds_average_their_predictions():
+    X = pd.DataFrame({'a': np.arange(4.)})
+    y = pd.Series(np.arange(4.))
+    splits = [(np.array([2, 3]), np.array([0, 1])), (np.array([3]), np.array([1, 2]))]
+
+    class OffsetByTrainingSize(ColumnRegressor):
+        def fit(self, X, y=None):
+            self.shift = len(X)
+            return self
+
+    stacker = LossStackingRegressor([('offset', OffsetByTrainingSize())], loss=loss_handler(), cv=splits)
+    oof, = stacker._oof_predictions(X, y, ['predict'])
+    np.testing.assert_array_equal(oof, [2., (3. + 2.) / 2, 3., np.nan])
+
+
+def test_classifier_with_splitter_without_partition(labelled):
+    X, y = labelled
+    estimators = [('bad', ColumnClassifier(1)), ('good', ColumnClassifier(0)), ('no_proba', ColumnClassifierNoProba(1))]
+    stacker = LossStackingClassifier(estimators, loss=loss_handler(accuracy_score, ml_objective='classification'),
+                                     cv=ShuffleSplit(4, test_size=.3, random_state=0)).fit(X, y)
+    assert stacker.coef_[1] > stacker.coef_[0]
+
+
+def test_classifier_aligns_folds_which_have_not_seen_all_classes():
+    X = pd.DataFrame({'a': [0, 1, 2] * 4})
+    y = pd.Series([0, 1, 2] * 4)
+    splits = [(np.flatnonzero(y != 2), np.arange(12))]  # -- the fold is trained without class 2
+    stacker = LossStackingClassifier([('a', ColumnClassifier(0, confidence=.5))], cv=splits,
+                                     loss=loss_handler(accuracy_score, ml_objective='classification'))
+    stacker.classes_ = np.array([0, 1, 2])
+    proba, = stacker._oof_predictions(X, y.to_numpy(), ['predict_proba'])
+    assert proba.shape == (12, 3)
+    np.testing.assert_array_equal(proba[:, 2], 0.)
+
+
 # ------------------------------------------------ optimiser ------------------------------------------------
 def test_penalty_replaces_non_finite_loss():
     base = _LossStackingBase([], loss=loss_handler(greater_is_better=False))
@@ -168,8 +229,16 @@ def test_optimiser_respects_bounds():
     assert base._optimise(decreasing, [np.array([1.])], bounds=[(0, None)]) == pytest.approx([0.], abs=1e-4)
 
 
-@pytest.mark.xfail(reason="BUG: _optimise accepts the result on a tie (<=), so if the loss is non-finite everywhere Powell's "
-                          "arbitrary end point is used as weights rather than the starting guess")
+def test_default_cross_validation_of_stacking(signal_and_noise):
+    X, y = signal_and_noise
+    assert LossStackingRegressor([('good', ColumnRegressor((0,)))], loss=loss_handler()).fit(X, y).coef_.shape == (1, 1)
+
+
+def test_stacking_of_arrays():
+    X, y = np.random.default_rng(0).normal(size=(40, 2)), np.arange(40.)
+    assert LossStackingRegressor([('a', ColumnRegressor((0,)))], loss=loss_handler(), cv=CV).fit(X, y).predict(X).shape == (40,)
+
+
 def test_constant_penalised_objective_keeps_start():
     def always_invalid(y_true, y_pred):
         return np.nan

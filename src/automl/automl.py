@@ -18,7 +18,7 @@ from sklearn.model_selection import KFold, GroupKFold, GroupShuffleSplit, Strati
 from sklearn.metrics import make_scorer
 from sklearn.cluster import KMeans
 from sklearn.ensemble import StackingRegressor, StackingClassifier
-from sklearn.linear_model import RidgeCV, RidgeClassifierCV
+from sklearn.linear_model import LogisticRegressionCV, RidgeCV, RidgeClassifierCV
 from sklearn.model_selection import train_test_split
 
 from .multi_output import MultiOutputStackingRegressor
@@ -89,7 +89,10 @@ class AutomatedML:
     cross_validation: callable, optional (default=KFold with 5 splits and shuffling, random_state=42)
         The cross-validation object to use for evaluation of models. When `group_by_index_columns` is set the
         default is GroupKFold with 5 splits and shuffling, such that all rows of a group are kept in the same
-        fold (preventing leakage between training and validation folds). Groups are passed to `split`.
+        fold (preventing leakage between training and validation folds). Targets and groups are passed to `split`.
+        Splitters need not place every row in one test fold (e.g. TimeSeriesSplit, GroupShuffleSplit) when
+        `stacking_meta_learner` is 'loss': rows in several test folds average their out-of-fold predictions and
+        rows in none do not contribute to the stacking weights. 'ridge' requires every row in exactly one test fold.
     sampler: callable, optional (default=TPESampler with seed=random_state)
         The sampler object to use for optimization of hyperparameters.
     pruner: callable, optional (default=HyperbandPruner with min_resource=1, max_resource='auto', reduction_factor=3)
@@ -130,8 +133,9 @@ class AutomatedML:
     stacking_meta_learner: str, optional (default='loss')
         Meta-learner combining the selected models into the stacked model. 'loss' combines the models with
         non-negative weights (per target) chosen to directly optimise `metric_optimise` (including grouping and
-        multi-output losses) on out-of-fold predictions. 'ridge' uses RidgeCV (RidgeClassifierCV), where
-        `metric_optimise` only selects the regularisation strength.
+        multi-output losses) on out-of-fold predictions. 'ridge' uses RidgeCV (RidgeClassifierCV, or
+        LogisticRegressionCV for losses with `needs_proba`), where `metric_optimise` only selects the regularisation
+        strength.
     models_to_optimize: list of str, optional (default=['lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lassolars'])
         The list of names of models to optimize, varies depending on whether objective is regression or classification.
         Check documentation of AutomatedML children classes for details
@@ -321,6 +325,13 @@ class AutomatedML:
             is_multioutput=self._is_multioutput,
             )
 
+        # -- checked here rather than failing in the stacking, after all models have been optimised
+        if self.stacking_meta_learner == 'ridge':
+            test_rows = np.concatenate([test for _, test in self._cv_splits(self.X_train, self.y_train)])
+            assert np.array_equal(np.sort(test_rows), np.arange(len(self.X_train))), (
+                f"stacking_meta_learner 'ridge' requires each row to be in exactly one test fold, which "
+                f"{type(self.cross_validation).__name__} does not provide. Use stacking_meta_learner='loss'.")
+
 
     def _resolve_training_objectives(self):
         """
@@ -331,9 +342,9 @@ class AutomatedML:
         self._loss.resolve_objectives(model_names)
 
 
-    def _cv_splits(self, X: pd.DataFrame) -> list:
-        """Cross-validation splits of X, passing the groups to the splitter when grouping applies."""
-        return list(self.cross_validation.split(X, groups=self._loss.group_labels(X.index)))
+    def _cv_splits(self, X: pd.DataFrame, y: pd.DataFrame = None) -> list:
+        """Cross-validation splits of X, passing the targets (for stratification) and, when grouping applies, the groups."""
+        return list(self.cross_validation.split(X, y, groups=self._loss.group_labels(X.index)))
 
 
     def _sample_fraction(self, X: pd.DataFrame, frac: float) -> pd.Index:
@@ -666,7 +677,7 @@ class AutomatedML:
             """
 
             # -- retrieve list containing with dataframes for training and testing for each fold
-            indexes_train_kfold = self._cv_splits(self.X_train)
+            indexes_train_kfold = self._cv_splits(self.X_train, self.y_train)
 
             # -- the first trial does not require pruning, go straight to last fit fraction
             fractions = [self.fit_frac[-1]] if trial.number == 0 else self.fit_frac
@@ -680,7 +691,7 @@ class AutomatedML:
 
                 # -- when too few samples are available for assessment proceed to next fraction,
                 # the last fraction is always assessed as it determines the performance of the trial
-                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / self.cross_validation.n_splits))
+                min_samples = int(np.ceil(len(self.X_train) * partial_fit_frac * 1 / len(indexes_train_kfold)))
                 if (min_samples < 20) & (idx_fraction < len(fractions) - 1):
                     continue
 
@@ -932,7 +943,7 @@ class AutomatedML:
             return
 
         # -- split data according to cross validation for assessment
-        indexes_test_cv = self._cv_splits(self.X_test)
+        indexes_test_cv = self._cv_splits(self.X_test, self.y_test)
 
         # -- determine names of models to assess
         models_to_assess = self.list_all_models_assess + ['stacked']
@@ -959,8 +970,10 @@ class AutomatedML:
                 # -- or Ridge meta-learner for which the loss only selects the regularisation strength
                 else:
                     # -- create a scorer compatible with Cross Validated Ridge
+                    needs_proba = (self._ml_objective == 'classification') & self.metric_optimise.needs_proba
                     scoring = make_scorer(
                         self.metric_optimise.metric,
+                        response_method = 'predict_proba' if needs_proba else 'predict',
                         greater_is_better = self._loss.greater_is_better
                         )
 
@@ -973,13 +986,15 @@ class AutomatedML:
 
                     elif self._ml_objective == 'classification':
                         _model_stacking = StackingClassifier
-                        final_estimator=RidgeClassifierCV(scoring=scoring)
+
+                        # -- ridge classifiers do not provide the probabilities required by the loss
+                        final_estimator = LogisticRegressionCV(scoring=scoring) if needs_proba else RidgeClassifierCV(scoring=scoring)
 
                     # -- splits are precomputed such that groups are kept together
                     self._model_final = _model_stacking(
                         estimators=estimator_temp,
                         final_estimator=final_estimator,
-                        cv=self._cv_splits(self.X_train)
+                        cv=self._cv_splits(self.X_train, self.y_train)
                         )
 
                 FuncHelper.function_warning_catcher(self._model_final.fit, [self.X_train, self.y_train],

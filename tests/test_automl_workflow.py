@@ -610,15 +610,14 @@ def test_ridge_stacking_keeps_groups_together(grouped_data, automl_kwargs):
         assert not set(groups[train]) & set(groups[test])
 
 
-@pytest.mark.xfail(raises=RuntimeError, reason="BUG: the ridge meta-learner scores labels with metric_optimise, also if "
-                                               "needs_proba=True, which fails for losses that require probabilities")
-def test_ridge_stacking_with_probability_loss(multiclass_data, automl_kwargs):
-    X, y = multiclass_data
+@pytest.mark.parametrize('data', ['binary_data', 'multiclass_data'])
+def test_ridge_stacking_with_probability_loss(request, automl_kwargs, data):
+    X, y = request.getfixturevalue(data)
     classification = AutomatedClassification(y=y, X=X, **automl_kwargs(
         models_to_optimize=['knn', 'bagging'], stacking_meta_learner='ridge', metric_optimise=CustomLoss(log_loss, needs_proba=True),
         optimisation_direction='minimize'))
     classification.apply()
-    assert 'stacked' in classification.summary
+    assert np.isfinite(classification.summary['stacked'][-1][0])  # -- the loss requires probabilities of the stacked model
 
 
 # ------------------------------------------------ stored stacked model ------------------------------------------------
@@ -817,41 +816,52 @@ def test_supported_cross_validators(grouped_data, automl_kwargs, cv):
     assert 'stacked' in regression.summary
 
 
-@pytest.mark.xfail(raises=TypeError, reason="BUG: _cv_splits does not pass y to split(), which StratifiedKFold requires, the error "
-                                            "in optimisation is swallowed and the failure only surfaces in model_evaluate")
 def test_stratified_cross_validation(binary_data, automl_kwargs):
     X, y = binary_data
     classification = AutomatedClassification(y=y, X=X, **automl_kwargs(models_to_optimize=['knn'], cross_validation=StratifiedKFold(3)))
+    for train, test in classification._cv_splits(classification.X_train, classification.y_train):
+        assert classification.y_train.iloc[test].mean().item() == pytest.approx(classification.y_train.mean().item(), abs=.02)
+
     classification.apply()
     assert 'stacked' in classification.summary
 
 
-@pytest.mark.xfail(raises=ValueError, reason="BUG: as StratifiedKFold, while listed in group_aware_cross_validators")
 def test_stratified_group_cross_validation(grouped_data, automl_kwargs):
     X, y = grouped_data
-    classification = AutomatedClassification(y=(y > y.median()).astype(int), X=X, **automl_kwargs(
-        models_to_optimize=['knn'], test_frac=.5, cross_validation=StratifiedGroupKFold(3), group_by_index_columns=['group']))
-    assert len(classification._cv_splits(classification.X_train)) == 3
-
-
-@pytest.mark.xfail(raises=TypeError, reason="BUG: `n_splits` is read from the attribute, which these splitters lack "
-                                               "(get_n_splits() should be used), while they are listed as group-aware")
-@pytest.mark.parametrize('cv', [LeaveOneGroupOut(), LeavePGroupsOut(2)], ids=lambda cv: type(cv).__name__)
-def test_leave_groups_out_cross_validation(grouped_data, automl_kwargs, cv):
-    X, y = grouped_data
-    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], cross_validation=cv,
-                                                               group_by_index_columns=['group'], test_frac=.5))
+    regression = AutomatedRegression(y=(y > y.median()).astype(int), X=X, **automl_kwargs(
+        models_to_optimize=['lassolars'], test_frac=.5, cross_validation=StratifiedGroupKFold(3), group_by_index_columns=['group']))
     regression.apply()
     assert 'stacked' in regression.summary
 
 
-@pytest.mark.xfail(raises=RuntimeError, reason="BUG: cross_val_predict in the stacking step requires splitters that partition "
-                                               "the data, so optimisation succeeds but stacking fails after all that work")
-@pytest.mark.parametrize('cv, settings', [(ShuffleSplit(3, random_state=0), {}), (TimeSeriesSplit(3), {}),
-                                          (GroupShuffleSplit(3, random_state=0), dict(group_by_index_columns=['group'], test_frac=.5))],
-                         ids=['ShuffleSplit', 'TimeSeriesSplit', 'GroupShuffleSplit'])
+@pytest.mark.parametrize('cv', [LeaveOneGroupOut(), LeavePGroupsOut(2)], ids=lambda cv: type(cv).__name__)
+def test_leave_groups_out_cross_validation(grouped_data, automl_kwargs, cv):
+    X, y = grouped_data
+    regression = AutomatedRegression(y=y.iloc[:96], X=X.iloc[:96], **automl_kwargs(
+        models_to_optimize=['lassolars'], cross_validation=cv, group_by_index_columns=['group'], test_frac=.5,
+        metric_optimise=mean_squared_error, optimisation_direction='minimize'))  # -- r2 is undefined on a single group
+    regression.apply()
+    assert completed_trials(regression, 'lassolars')
+    assert np.isfinite(regression.summary['stacked'][-1][0])
+
+
+NON_PARTITIONING = [(ShuffleSplit(3, random_state=0), {}), (TimeSeriesSplit(3), {}),
+                    (GroupShuffleSplit(3, random_state=0), dict(group_by_index_columns=['group'], test_frac=.5))]
+NON_PARTITIONING_IDS = ['ShuffleSplit', 'TimeSeriesSplit', 'GroupShuffleSplit']
+
+
+@pytest.mark.parametrize('cv, settings', NON_PARTITIONING, ids=NON_PARTITIONING_IDS)
 def test_non_partitioning_cross_validation(grouped_data, automl_kwargs, cv, settings):
     X, y = grouped_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], cross_validation=cv, **settings))
     regression.apply()
+    assert isinstance(regression._model_final, LossStackingRegressor)
     assert 'stacked' in regression.summary
+
+
+@pytest.mark.parametrize('cv, settings', NON_PARTITIONING, ids=NON_PARTITIONING_IDS)
+def test_ridge_stacking_rejects_non_partitioning_cross_validation_before_optimising(grouped_data, automl_kwargs, cv, settings):
+    X, y = grouped_data
+    with pytest.raises(AssertionError, match="exactly one test fold"):
+        AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], cross_validation=cv,
+                                                      stacking_meta_learner='ridge', **settings))
