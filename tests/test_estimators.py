@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone
+from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone, is_classifier
 from sklearn.datasets import make_classification
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import accuracy_score, r2_score
@@ -9,7 +9,8 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import QuantileTransformer, StandardScaler
 
 from automl.classifiers import classifier_selector
-from automl.estimators import EvalSetMultiOutputRegressor, LossAwarePipeline, LossAwareTransformedTargetRegressor, find_adapters
+from automl.estimators import EvalSetMultiOutputRegressor, LabelEncodedClassifier, LossAwarePipeline, \
+    LossAwareTransformedTargetRegressor, find_adapters
 from automl.loss import CustomLoss, EvalMetric, GradHessObjective, LossHandler, TargetCenterer, squared_error_grad_hess
 from automl.regressors import regressor_selector
 
@@ -161,6 +162,40 @@ def test_target_regressor_predicts_on_original_scale():
     np.testing.assert_allclose(np.ravel(model.predict(X)), y)
 
 
+# -------------------------------------------- label encoding --------------------------------------------
+def test_label_encoded_classifier_fits_on_encoded_labels_and_predicts_original_labels():
+    from sklearn.linear_model import LogisticRegression
+    X = np.array([[0.], [1.], [2.], [3.], [4.], [5.]])
+    y = pd.DataFrame({'y': ['b', 'b', 'b', 'c', 'c', 'c']})
+    model = LabelEncodedClassifier(LogisticRegression()).fit(X, y)
+
+    np.testing.assert_array_equal(model.estimator_.classes_, [0, 1])
+    np.testing.assert_array_equal(model.classes_, ['b', 'c'])
+    np.testing.assert_array_equal(model.predict(X[[0, 5]]), ['b', 'c'])
+    assert model.predict_proba(X).shape == (6, 2)
+
+
+def test_label_encoded_classifier_encodes_eval_set():
+    class Recording(RecordingClassifier):
+        def fit(self, X, y, eval_set=None, verbose=None):
+            self.classes_, self.eval_set_, self.verbose_ = np.unique(y), eval_set, verbose
+            return self
+
+    X, y = np.zeros((4, 1)), np.array([3, 7, 3, 7])
+    model = LabelEncodedClassifier(Recording()).fit(X, y, eval_set=[(X, y[::-1])], verbose=False)
+    np.testing.assert_array_equal(model.estimator_.eval_set_[0][1], [1, 0, 1, 0])
+    assert model.estimator_.verbose_ is False
+
+
+def test_label_encoded_classifier_is_recognised_as_classifier():
+    assert is_classifier(LabelEncodedClassifier(RecordingClassifier()))
+
+
+def test_adapters_are_found_through_label_encoded_classifier():
+    metric = EvalMetric(loss_handler(accuracy_score, ml_objective='classification'))
+    assert find_adapters(LabelEncodedClassifier(RecordingClassifier(eval_metric=metric))) == [metric]
+
+
 # ------------------------------------------- per-target wrapper -------------------------------------------
 def test_multi_output_wrapper_gives_each_model_its_own_target():
     X, y = np.arange(20.).reshape(10, 2), np.arange(20.).reshape(10, 2)
@@ -191,10 +226,6 @@ def test_multi_output_wrapper_exposes_number_of_features():
 
 
 # ---------------------------------- early stopping through the libraries ----------------------------------
-LIGHTGBM_METRIC_BUG = pytest.mark.xfail(
-    reason="BUG: LightGBM also evaluates its built-in metric and stops on that first metric (e.g. binary_logloss), so early "
-           "stopping and the retained round do not follow metric_optimise. Set metric='None' alongside a custom eval_metric")
-BOOSTED_MARKED = [pytest.param(name, marks=LIGHTGBM_METRIC_BUG) if name == 'lightgbm' else name for name in BOOSTED_MODELS]
 BOOSTER_SILENT = {'lightgbm': {'verbosity': -1, 'n_estimators': 25}, 'xgboost': {'n_estimators': 25},
                   'catboost': {'logging_level': 'Silent', 'iterations': 25}}
 
@@ -211,7 +242,7 @@ def fit_with_early_stopping(model_class, model_name, handler, X, y, split, trans
 
 
 @pytest.mark.parametrize('n_classes', [2, 3])
-@pytest.mark.parametrize('model_name', BOOSTED_MARKED)
+@pytest.mark.parametrize('model_name', BOOSTED_MODELS)
 def test_classification_eval_metric_agrees_with_predictions(model_name, n_classes):
     """The accuracy reported to the library must be that of the model: the best round is what `predict` uses."""
     X, y = make_classification(n_samples=300, n_features=6, n_informative=4, n_classes=n_classes, random_state=0)
@@ -248,7 +279,7 @@ def test_regression_eval_metric_agrees_with_predictions(model_name, regression_d
     assert max(seen) == pytest.approx(r2_score(y.iloc[200:], pipeline.predict(X.iloc[200:])), abs=1e-6)
 
 
-@pytest.mark.parametrize('model_name', BOOSTED_MARKED)
+@pytest.mark.parametrize('model_name', BOOSTED_MODELS)
 def test_early_stopping_honours_optimisation_direction(model_name, regression_data):
     """With a loss which only worsens with more rounds, stopping must retain an early round."""
     X, y = regression_data

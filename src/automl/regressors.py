@@ -32,7 +32,7 @@ def regressor_selector(regressor_names, random_state = None):
     if selected_regressors == []:
         return print('No valid regressor names provided')
     if invalid_regressors != []:
-        return print(f"Invalid regressor(s) supplied: {invalid_regressors}. Skipped")
+        print(f"Invalid regressor(s) supplied: {invalid_regressors}. Skipped")
     
     # -- only load the regressor and import relevant package if provided regressor is in the list of pre-defined regressors
     regressor_dict = {}
@@ -267,7 +267,7 @@ def knn_loader():
 
 def sgd_loader(random_state):
     
-    from sklearn.neighbors import SGDRegressor
+    from sklearn.linear_model import SGDRegressor
     
     def sgdHParams(trial):
         param_dict = {}

@@ -45,8 +45,6 @@ def test_grouping_column_must_be_in_index(grouped_data, automl_kwargs):
         AutomatedRegression(y=y, X=X, **automl_kwargs(group_by_index_columns=['nonexistent']))
 
 
-@pytest.mark.xfail(raises=(AttributeError, TypeError), reason="BUG: one unknown model name makes regressor_selector return "
-                                                              "None, so all valid models are dropped and apply() crashes")
 def test_unknown_model_name_does_not_drop_valid_models(regression_data, automl_kwargs):
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars', 'nonexistent']))

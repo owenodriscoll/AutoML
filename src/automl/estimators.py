@@ -7,10 +7,11 @@ losses), the fitted target transformer (to evaluate the loss on the original sca
 """
 
 import numpy as np
-from sklearn.base import clone, is_classifier
+from sklearn.base import BaseEstimator, ClassifierMixin, clone, is_classifier
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder
 
 from .loss import LossAdapter, GradHessObjective, EvalMetric
 
@@ -78,6 +79,32 @@ class LossAwareTransformedTargetRegressor(TransformedTargetRegressor):
 def _transform_like(transformer, y) -> np.ndarray:
     y = np.asarray(y, dtype=float)
     return transformer.transform(y.reshape(len(y), -1)).reshape(y.shape)
+
+
+class LabelEncodedClassifier(ClassifierMixin, BaseEstimator):
+    """
+    Fits a classifier on labels encoded to 0..n-1, which XGBClassifier requires, while predicting the original labels.
+    The targets of `eval_set` are encoded accordingly.
+    """
+
+    def __init__(self, estimator):
+        self.estimator = estimator
+
+    def fit(self, X, y, eval_set=None, **fit_params):
+        self.encoder_ = LabelEncoder().fit(np.ravel(y))
+        self.classes_ = self.encoder_.classes_
+
+        if eval_set is not None:
+            fit_params['eval_set'] = [(X_val, self.encoder_.transform(np.ravel(y_val))) for X_val, y_val in eval_set]
+
+        self.estimator_ = clone(self.estimator).fit(X, self.encoder_.transform(np.ravel(y)), **fit_params)
+        return self
+
+    def predict(self, X):
+        return self.encoder_.inverse_transform(np.ravel(self.estimator_.predict(X)).astype(int))
+
+    def predict_proba(self, X):
+        return self.estimator_.predict_proba(X)
 
 
 class EvalSetMultiOutputRegressor(MultiOutputRegressor):

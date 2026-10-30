@@ -292,6 +292,8 @@ class LossHandler:
         per_target_wrapper = self.is_multioutput and not objective.native_multioutput
         if early_stopping and not per_target_wrapper:
             if model_name == 'lightgbm':
+                # -- LightGBM otherwise also evaluates its built-in metric, and stops on whichever stalls first
+                params['metric'] = 'None'
                 fit_params['eval_metric'] = LightGBMEvalMetric(self)
             elif model_name == 'xgboost':
                 params['eval_metric'] = XGBoostEvalMetric(self)

@@ -367,8 +367,6 @@ def test_weak_model_selection_is_seeded(regression_data, automl_kwargs):
     assert len(selections) > 1
 
 
-@pytest.mark.xfail(reason="BUG: model_select_best filters every trial on the parameter names of the best trial, so weak "
-                          "models lose the parameters their booster has but the best trial's does not (and get defaults)")
 def test_weak_models_keep_their_own_hyperparameters(regression_data, automl_kwargs):
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['dummy'], n_trial=20, n_weak_models=19))
@@ -383,6 +381,13 @@ def test_weak_models_keep_their_own_hyperparameters(regression_data, automl_kwar
     assert weak_quantile_models
     for name, trial in weak_quantile_models.items():
         assert dict(regression.estimators)[name].named_steps['model'].regressor.quantile == trial.params['quantile']
+
+
+def test_weak_models_with_conditional_hyperparameters_can_be_trained(regression_data, automl_kwargs):
+    X, y = regression_data
+    regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['dummy'], n_trial=20, n_weak_models=19))
+    regression.apply()
+    assert np.isfinite(regression.summary['stacked'][-1][0])
 
 
 def test_models_to_assess_may_be_subset_of_optimised_models(regression_data, automl_kwargs):
@@ -422,8 +427,6 @@ def test_transformer_settings_of_best_trial_are_restored(regression_data, automl
     assert transformer.n_quantiles == 100 and transformer.output_distribution == 'normal'
 
 
-@pytest.mark.xfail(reason="BUG: model_select_best passes random_state positionally into the `trial` parameter of "
-                          "TransformerChooser, so the transformer always gets the default random_state of 42")
 def test_transformer_uses_configured_random_state(regression_data, automl_kwargs):
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=['lassolars'], random_state=7,
@@ -673,8 +676,7 @@ def test_runs_are_reproducible(regression_data, automl_kwargs, tmp_path, models)
 
 # ------------------------------------------------------ all models ------------------------------------------------------
 @pytest.mark.slow
-@pytest.mark.parametrize('model_name', [pytest.param(name, marks=pytest.mark.xfail(raises=ImportError, reason="BUG: see test_model_selectors"))
-                                        if name == 'sgd' else name for name in REGRESSORS])
+@pytest.mark.parametrize('model_name', REGRESSORS)
 def test_regressor_end_to_end(regression_data, automl_kwargs, model_name):
     X, y = regression_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=[model_name]))
@@ -694,15 +696,8 @@ def test_classifier_end_to_end(request, automl_kwargs, model_name, data):
     assert set(np.unique(classification.y_pred)) <= set(y)
 
 
-MULTI_OUTPUT_BUG = pytest.mark.xfail(raises=RuntimeError, reason="BUG: these models lack native multi-output but are missing from "
-                                                                 "models_without_native_multioutput, so they are not wrapped and fail "
-                                                                 "(TODO in automl.py). histgradientboost is even a default model")
-
-
 @pytest.mark.slow
-@pytest.mark.parametrize('model_name', [pytest.param(name, marks=MULTI_OUTPUT_BUG)
-                                        if name in ['adaboost', 'gradientboost', 'histgradientboost', 'svr'] else name
-                                        for name in REGRESSORS if name != 'sgd'])
+@pytest.mark.parametrize('model_name', REGRESSORS)
 def test_multi_output_regressor_end_to_end(multioutput_data, automl_kwargs, model_name):
     X, y = multioutput_data
     regression = AutomatedRegression(y=y, X=X, **automl_kwargs(models_to_optimize=[model_name]))
@@ -723,9 +718,7 @@ def test_multi_output_boosted_models_with_early_stopping(multioutput_data, autom
 
 @pytest.mark.slow
 @pytest.mark.parametrize('labels', [[3, 7], ['cat', 'dog']], ids=['integers', 'strings'])
-@pytest.mark.parametrize('model_name', ['lightgbm', 'catboost', pytest.param('xgboost', marks=pytest.mark.xfail(
-    reason="BUG: XGBClassifier requires labels 0..n-1 and labels are not encoded, so a trial crashes and the "
-           "model is silently left out of the results"))])
+@pytest.mark.parametrize('model_name', BOOSTED_MODELS)
 def test_classifier_with_arbitrary_labels(binary_data, automl_kwargs, model_name, labels):
     X, y = binary_data
     y = y.map(dict(enumerate(labels)))
@@ -735,8 +728,6 @@ def test_classifier_with_arbitrary_labels(binary_data, automl_kwargs, model_name
     assert classification.summary['stacked'][-1][0] > .5
 
 
-@pytest.mark.xfail(reason="BUG: n_classes is derived with set() of a DataFrame, which iterates over column names, so it is 2 "
-                          "for any number of classes")
 def test_number_of_classes_is_detected(multiclass_data, automl_kwargs):
     X, y = multiclass_data
     classification = AutomatedClassification(y=y, X=X, **automl_kwargs(models_to_optimize=['lightgbm']))

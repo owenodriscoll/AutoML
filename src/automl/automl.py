@@ -23,7 +23,8 @@ from sklearn.model_selection import train_test_split
 
 from .multi_output import MultiOutputStackingRegressor
 from .loss import CustomLoss, LossHandler, TargetCenterer
-from .estimators import LossAwarePipeline, LossAwareTransformedTargetRegressor, EvalSetMultiOutputRegressor
+from .estimators import LossAwarePipeline, LossAwareTransformedTargetRegressor, EvalSetMultiOutputRegressor, \
+    LabelEncodedClassifier
 from .stacking import LossStackingRegressor, LossStackingClassifier
 from .scalers_transformers import PcaChooser, PolyChooser, SplineChooser, ScalerChooser, \
     TransformerChooser, CategoricalChooser#, FourrierExpansion
@@ -34,7 +35,6 @@ from .utils.grouped_train_test_splitter import groupwise_train_test_split
 # FIXME add encoding for clustering of feature importance 
 # FIXME make timeout_trial compatible with catboost
 
-# TODO Validate models for multi-output compatibility
 # TODO Separate transformers per target?
 # TODO try polynomial features with interactions_only = True, include_bias = False
 # TODO add option to overwrite study instead of only coninuing previous available studies
@@ -47,7 +47,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 NoneType = type(None)
 
 models_with_early_stopping = ['xgboost', 'catboost', 'lightgbm']
-models_without_native_multioutput = ['bayesianridge', 'xgboost', 'catboost', 'lightgbm']
+models_without_native_multioutput = ['bayesianridge', 'xgboost', 'catboost', 'lightgbm', 'adaboost', 'gradientboost',
+                                     'histgradientboost', 'sgd', 'svr']
 group_aware_cross_validators = (GroupKFold, GroupShuffleSplit, StratifiedGroupKFold, LeaveOneGroupOut, LeavePGroupsOut)
 
 
@@ -365,7 +366,7 @@ class AutomatedML:
         trains on a custom objective the target is only centered, see loss.TargetCenterer.
         """
         if self._ml_objective == 'classification':
-            return model_with_parameters
+            return LabelEncodedClassifier(model_with_parameters) if model_name == 'xgboost' else model_with_parameters
 
         if self._loss.needs_per_target_wrapper(model_name, model_name in models_without_native_multioutput):
             model_with_parameters = EvalSetMultiOutputRegressor(model_with_parameters)
@@ -843,12 +844,9 @@ class AutomatedML:
                 print(f"No completed trials for {model_name} — skipping.", flush=True)
                 continue
             
-            # -- select parameters corresponding to model
-            list_params = list(study.best_params)
+            # -- parameters of the trials not belonging to the model
             list_params_not_model = ['scaler', 'pca_value', 'spline_value', 'poly_value', 'feature_combo',
                                          'transformers', 'n_quantiles', 'output_distribution']
-            list_params_model = set(list_params).difference(set(list_params_not_model))
-
 
             # -- ensure that selected number of weak models does not exceed `total completed trials` - `best trial`
             n_weak_models = self.n_weak_models
@@ -883,7 +881,7 @@ class AutomatedML:
             for i, idx_model in enumerate(idx_models):
 
                 model_params = study.trials[idx_model].params
-                parameter_dict = {k: model_params[k] for k in model_params.keys() & set(list_params_model)}
+                parameter_dict = {k: v for k, v in model_params.items() if k not in list_params_not_model}
 
                 # -- select all the pipeline steps corresponding to input settings or best trial
                 categorical = CategoricalChooser(self.ordinal_columns, self.nominal_columns).fit()
@@ -898,7 +896,7 @@ class AutomatedML:
                 model_with_parameters, _ = self._loss.configure_estimator(model_with_parameters, model_name)
 
                 # -- Create transformed regressor (regression), or normal classification model
-                transformer = TransformerChooser(model_params.get('n_quantiles'), model_params.get('output_distribution'), self.random_state).fit()
+                transformer = TransformerChooser(model_params.get('n_quantiles'), model_params.get('output_distribution'), random_state=self.random_state).fit()
                 model_final = self._build_model(model_name, model_with_parameters, transformer)
 
                 pipe_single_study = LossAwarePipeline([

@@ -241,8 +241,9 @@ def test_catboost_custom_objective_requires_evaluation_metric():
 
 
 def test_early_stopping_metric_per_library():
-    _, fit_params = configured(loss_handler(), 'lightgbm', early_stopping=True)
+    model, fit_params = configured(loss_handler(), 'lightgbm', early_stopping=True)
     assert isinstance(fit_params['eval_metric'], LightGBMEvalMetric)
+    assert model.get_params()['metric'] == 'None'  # -- the built-in metric must not take part in early stopping
 
     model, fit_params = configured(loss_handler(), 'xgboost', early_stopping=True)
     assert isinstance(model.get_params()['eval_metric'], XGBoostEvalMetric)
@@ -259,7 +260,7 @@ def test_no_early_stopping_metric_without_early_stopping():
 
 def test_per_target_wrapped_models_keep_default_early_stopping_metric():
     model, fit_params = configured(loss_handler(is_multioutput=True), 'lightgbm', early_stopping=True)
-    assert 'eval_metric' not in fit_params
+    assert 'eval_metric' not in fit_params and 'metric' not in model.get_params()
     model, _ = configured(loss_handler(is_multioutput=True), 'xgboost', early_stopping=True)
     assert model.get_params()['eval_metric'] is None
 

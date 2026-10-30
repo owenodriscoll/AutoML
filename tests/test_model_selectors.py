@@ -12,9 +12,6 @@ REGRESSORS = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'bayesianridge', 'lass
               'histgradientboost', 'knn', 'sgd', 'bagging', 'svr', 'elasticnet']
 CLASSIFIERS = ['dummy', 'lightgbm', 'xgboost', 'catboost', 'adaboost', 'gradientboost', 'histgradientboost', 'knn', 'sgd',
                'bagging', 'svc']
-SGD_IMPORT_BUG = pytest.mark.xfail(raises=ImportError, reason="BUG: regressors.sgd_loader imports SGDRegressor from "
-                                                              "sklearn.neighbors instead of sklearn.linear_model")
-REGRESSORS_MARKED = [pytest.param(name, marks=SGD_IMPORT_BUG) if name == 'sgd' else name for name in REGRESSORS]
 
 
 def sampled_params(create_params, seed):
@@ -22,7 +19,7 @@ def sampled_params(create_params, seed):
 
 
 # --------------------------------------------- selection ---------------------------------------------
-@pytest.mark.parametrize('name', REGRESSORS_MARKED)
+@pytest.mark.parametrize('name', REGRESSORS)
 def test_regressor_loads(name):
     model, create_params = regressor_selector([name], random_state=0)[name]
     assert callable(model) and callable(create_params)
@@ -51,10 +48,9 @@ def test_no_valid_classifier_reports_and_returns_none(capsys):
     assert 'no valid classifier' in capsys.readouterr().out
 
 
-@pytest.mark.xfail(raises=TypeError, reason="BUG: the message says invalid names are skipped, but all models are dropped "
-                                            "(None is returned). classifier_selector does skip them")
-def test_invalid_regressor_name_is_skipped():
+def test_invalid_regressor_name_is_skipped(capsys):
     assert list(regressor_selector(['lassolars', 'nonexistent'])) == ['lassolars']
+    assert "Invalid regressor(s) supplied: ['nonexistent']" in capsys.readouterr().out
 
 
 def test_invalid_classifier_name_is_skipped():
@@ -64,7 +60,7 @@ def test_invalid_classifier_name_is_skipped():
 # --------------------------------------------- search spaces ---------------------------------------------
 @pytest.mark.slow
 @pytest.mark.parametrize('seed', range(3))
-@pytest.mark.parametrize('name', [n for n in REGRESSORS if n != 'sgd'])
+@pytest.mark.parametrize('name', REGRESSORS)
 def test_sampled_regressor_hyperparameters_fit_and_predict(name, seed):
     X, y = make_regression(n_samples=150, n_features=4, random_state=0)
     model, create_params = regressor_selector([name], random_state=0)[name]
@@ -86,7 +82,7 @@ def test_sampled_classifier_hyperparameters_fit_and_predict(name, n_classes, see
 @pytest.mark.parametrize('name, parameter', [('lightgbm', 'random_state'), ('xgboost', 'random_state'),
                                              ('catboost', 'random_seed'), ('lassolars', 'random_state'),
                                              ('adaboost', 'random_state'), ('gradientboost', 'random_state'),
-                                             ('histgradientboost', 'random_state'), ('bagging', 'random_state'),
+                                             ('histgradientboost', 'random_state'), ('sgd', 'random_state'), ('bagging', 'random_state'),
                                              ('svr', 'random_state'), ('elasticnet', 'random_state')])
 def test_regressor_random_state_is_fixed(name, parameter):
     assert sampled_params(regressor_selector([name], random_state=123)[name][1], 0)[parameter] == 123
