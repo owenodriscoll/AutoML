@@ -203,7 +203,6 @@ def gradientboost_loader(random_state):
         param_dict['n_estimators'] =trial.suggest_int("n_estimators", 10, max_iterations)
         param_dict['learning_rate'] = trial.suggest_float("learning_rate", min_learning_rate, 1e0, log = True)
         param_dict['subsample'] = trial.suggest_float("subsample", 1e-2, 1.0, log = False)
-        param_dict['criterion'] = trial.suggest_categorical("criterion", ['friedman_mse', 'squared_error'])
         param_dict['n_iter_no_change'] = trial.suggest_categorical("n_iter_no_change", [20])
         param_dict['random_state'] =  trial.suggest_categorical("random_state", [random_state])
         return param_dict
